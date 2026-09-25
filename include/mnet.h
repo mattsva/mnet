@@ -1,5 +1,3 @@
-#define _POSIX_C_SOURCE 200112L // C17
-
 #ifndef MNET_H
 #define MNET_H
 

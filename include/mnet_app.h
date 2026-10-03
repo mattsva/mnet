@@ -6,6 +6,10 @@
 
 typedef struct mnet_app mnet_app_t;
 
+typedef mnet_response_t (*mnet_middleware_t)(
+    mnet_request_t *req,
+    mnet_response_t (*next)(mnet_request_t *));
+
 mnet_app_t *mnet_create(void);
 
 void mnet_destroy(mnet_app_t *app);
@@ -31,5 +35,7 @@ int mnet_route(
 void mnet_set_debug(mnet_app_t *app, int enabled);
 
 void mnet_set_not_found_handler(mnet_app_t *app, mnet_response_t (*handler)(mnet_request_t *req));
+
+void mnet_use(mnet_app_t *app, mnet_middleware_t middleware);
 
 #endif

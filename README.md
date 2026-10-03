@@ -50,6 +50,21 @@ MNET_PATCH(app, "/api/users/:id", patch_user);
 MNET_DELETE(app, "/api/users/:id", delete_user);
 ```
 
+### Middleware
+
+```c
+mnet_response_t my_middleware(mnet_request_t *req,
+    mnet_response_t (*next)(mnet_request_t *))
+{
+    // pre-processing
+    mnet_response_t resp = next(req);
+    // post-processing
+    return resp;
+}
+
+mnet_use(app, my_middleware);
+```
+
 ### Request parameters
 
 **Path parameters** (`:id`, `:post_id`, etc.):

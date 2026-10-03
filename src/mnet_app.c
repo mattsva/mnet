@@ -28,6 +28,7 @@ struct mnet_app {
     int running;
     int debug;
     mnet_response_t (*not_found_handler)(mnet_request_t *req);
+    mnet_middleware_t middleware;
 };
 static int mnet_add_route(
     mnet_app_t *app,
@@ -603,8 +604,12 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
             .extras = &extras,
         };
 
-        /* Call handler */
-        response = route->handler(&req);
+        /* Call handler, optionally through middleware */
+        if (app->middleware) {
+            response = app->middleware(&req, route->handler);
+        } else {
+            response = route->handler(&req);
+        }
 
         /* Debug logging */
         if (app_debug) {
@@ -656,6 +661,11 @@ void mnet_set_debug(mnet_app_t *app, int enabled)
 void mnet_set_not_found_handler(mnet_app_t *app, mnet_response_t (*handler)(mnet_request_t *req))
 {
     if (app != NULL) app->not_found_handler = handler;
+}
+
+void mnet_use(mnet_app_t *app, mnet_middleware_t middleware)
+{
+    if (app != NULL) app->middleware = middleware;
 }
 
 int mnet_run(mnet_app_t *app, uint16_t port)

@@ -304,6 +304,25 @@ static void test_http_method_enum(void)
     printf("  PASS test_http_method_enum\n");
 }
 
+static int middleware_called = 0;
+
+static mnet_response_t sample_middleware(mnet_request_t *req,
+    mnet_response_t (*next)(mnet_request_t *))
+{
+    middleware_called++;
+    return next(req);
+}
+
+static void test_middleware(void)
+{
+    mnet_app_t *app = mnet_create();
+    assert(app != NULL);
+
+    mnet_use(app, sample_middleware);
+    mnet_destroy(app);
+    printf("  PASS test_middleware\n");
+}
+
 int main(void)
 {
     printf("Running mnet tests...\n");
@@ -333,6 +352,7 @@ int main(void)
     test_route_macros_compile();
 
     test_http_method_enum();
+    test_middleware();
 
     printf("\nAll tests passed!\n");
     return 0;

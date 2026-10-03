@@ -5,12 +5,48 @@ on:
   pull_request:
 
 jobs:
-  test:
+  test-make:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run tests
+      - name: Run tests with Make
         run: make test
+
+  test-cmake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
+
+      - name: Build with CMake
+        run: |
+          mkdir build && cd build
+          cmake ..
+          make
+
+      - name: Run tests with CTest
+        run: cd build && ctest --output-on-failure
+
+  test-meson:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Meson
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build
+
+      - name: Build with Meson
+        run: |
+          meson setup build
+          meson compile -C build
+
+      - name: Run tests with Meson
+        run: meson test -C build --print-errorlogs

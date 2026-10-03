@@ -4,11 +4,47 @@ A simple, ergonomic Web Framework for C.
 
 ## Building
 
+### Using Make (default)
+
 ```sh
-make
+make              # Build examples and test_mnet
+make test         # Build and run tests
+make clean        # Remove build artifacts
 ```
 
-This builds `mnet-server` (the main example) and `test_mnet` (the test runner).
+### Using CMake
+
+```sh
+mkdir build && cd build
+cmake ..
+make
+ctest             # Run tests
+```
+
+### Using Meson
+
+```sh
+meson setup build
+meson compile -C build
+meson test -C build
+```
+
+### Linking against mnet
+
+After building, you can link against the static or shared library:
+
+```sh
+# Static library
+gcc -Iinclude myapp.c build/libmnet.a -o myapp
+
+# Shared library
+gcc -Iinclude myapp.c -Lbuild -lmnet -o myapp
+```
+
+Or use pkg-config (if installed):
+```sh
+gcc $(pkg-config --cflags --libs mnet) myapp.c -o myapp
+```
 
 ## API Overview
 

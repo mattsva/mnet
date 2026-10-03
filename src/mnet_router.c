@@ -24,7 +24,10 @@ int mnet_route_match(const mnet_route_t *route,
             if (n < max_values) {
                 size_t seg_len = (size_t)(request_path + rpos - seg_start);
                 char *value = malloc(seg_len + 1);
-                if (value == NULL) return -1;
+                if (value == NULL) {
+                    mnet_match_params_free(out_values, (int)n);
+                    return -1;
+                }
                 memcpy(value, seg_start, seg_len);
                 value[seg_len] = '\0';
                 out_values[n] = value;
@@ -40,6 +43,7 @@ int mnet_route_match(const mnet_route_t *route,
             /* Consume the '/' in the request path if present */
             if (request_path[rpos] == '/') rpos++;
         } else if (pattern[ppos] != request_path[rpos]) {
+            mnet_match_params_free(out_values, (int)n);
             return 0;
         } else {
             ppos++;
@@ -47,8 +51,10 @@ int mnet_route_match(const mnet_route_t *route,
         }
     }
 
-    if (pattern[ppos] != '\0' || request_path[rpos] != '\0')
+    if (pattern[ppos] != '\0' || request_path[rpos] != '\0') {
+        mnet_match_params_free(out_values, (int)n);
         return 0;
+    }
 
     return (int)n;
 }

@@ -534,6 +534,8 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
         }
 
         send_response(client, &response);
+
+        mnet_match_params_free(param_values, (int)pc);
     }
 
     free_extras(&extras);

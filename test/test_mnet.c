@@ -223,6 +223,20 @@ static void test_mnet_route_match_static(void)
     printf("  PASS test_mnet_route_match_static\n");
 }
 
+static void test_mnet_route_match_partial_free(void)
+{
+    mnet_route_t route = {
+        .method = MNET_HTTP_GET,
+        .path = "/api/users/:id/posts/:post_id",
+        .param_names = (const char *[]){"id", "post_id", NULL},
+    };
+
+    const char *values[4] = {0};
+    int n = mnet_route_match(&route, "/api/users/42", values, 4);
+    assert(n == 0);
+    printf("  PASS test_mnet_route_match_partial_free\n");
+}
+
 MNET_HANDLER(test_handler)
 {
     (void)req;
@@ -286,6 +300,7 @@ int main(void)
     test_mnet_route_match_multi();
     test_mnet_route_match_no_match();
     test_mnet_route_match_static();
+    test_mnet_route_match_partial_free();
 
     test_handler_macro();
     test_route_macros_compile();

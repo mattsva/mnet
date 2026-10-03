@@ -177,11 +177,37 @@ mnet_response_t mnet_json(const char *json)
 
 mnet_response_t mnet_jsonfv(const char *format, va_list args)
 {
-    char buf[65536];
+    size_t cap = 256;
     size_t pos = 0;
-    const char *f = format;
+    char *buf = malloc(cap);
+    if (buf == NULL) {
+        mnet_response_t r = {
+            .status = 200,
+            .content_type = "application/json",
+            .body = strdup("null"),
+            .body_length = 4,
+        };
+        return r;
+    }
 
-    while (*f && pos < sizeof(buf) - 1) {
+    const char *f = format;
+    while (*f) {
+        if (pos + 1 >= cap) {
+            cap *= 2;
+            char *nb = realloc(buf, cap);
+            if (nb == NULL) {
+                free(buf);
+                mnet_response_t r = {
+                    .status = 200,
+                    .content_type = "application/json",
+                    .body = strdup("null"),
+                    .body_length = 4,
+                };
+                return r;
+            }
+            buf = nb;
+        }
+
         if (*f != '%') {
             buf[pos++] = *f++;
             continue;
@@ -199,15 +225,25 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
             f++; /* skip 's' */
             const char *s = va_arg(args, const char *);
             if (s == NULL) s = "(null)";
-            /* JSON-escape the string into the buffer */
             char escaped[4096];
             size_t elen = mnet_json_escape(escaped, sizeof(escaped), s);
-            if (pos + elen < sizeof(buf)) {
-                memcpy(buf + pos, escaped, elen);
-                pos += elen;
-            } else {
-                pos = sizeof(buf) - 1;
+            while (pos + elen + 1 >= cap) {
+                cap *= 2;
+                char *nb = realloc(buf, cap);
+                if (nb == NULL) {
+                    free(buf);
+                    mnet_response_t r = {
+                        .status = 200,
+                        .content_type = "application/json",
+                        .body = strdup("null"),
+                        .body_length = 4,
+                    };
+                    return r;
+                }
+                buf = nb;
             }
+            memcpy(buf + pos, escaped, elen);
+            pos += elen;
             continue;
         }
 
@@ -215,13 +251,10 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
         const char *spec_start = f - 1; /* point to '%' */
         const char *p = f;
         while (*p && *p != '%') {
-            /* conversion characters (not 's', which we handled) */
             if (strchr("diouxXfFeEgGaAcCpPn", *p)) break;
-            /* flag / width / precision / modifier chars keep going */
             p++;
         }
 
-        /* Build the one-specifier format string */
         size_t spec_len = (size_t)(p - spec_start) + 1;
         char spec[64];
         if (spec_len < sizeof(spec)) {
@@ -230,11 +263,25 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
 
             char val[256];
             int vlen = vsnprintf(val, sizeof(val), spec, args);
-            if (vlen > 0 && pos + (size_t)vlen < sizeof(buf)) {
-                memcpy(buf + pos, val, (size_t)vlen);
-                pos += (size_t)vlen;
-            } else if (vlen > 0) {
-                pos = sizeof(buf) - 1;
+            if (vlen > 0) {
+                size_t vlen_sz = (size_t)vlen;
+                while (pos + vlen_sz + 1 >= cap) {
+                    cap *= 2;
+                    char *nb = realloc(buf, cap);
+                    if (nb == NULL) {
+                        free(buf);
+                        mnet_response_t r = {
+                            .status = 200,
+                            .content_type = "application/json",
+                            .body = strdup("null"),
+                            .body_length = 4,
+                        };
+                        return r;
+                    }
+                    buf = nb;
+                }
+                memcpy(buf + pos, val, vlen_sz);
+                pos += vlen_sz;
             }
         }
         f = p + 1; /* advance past conversion character */
@@ -242,15 +289,11 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
 
     buf[pos] = '\0';
 
-    /* Heap-allocate so the response owns its body */
-    char *owned = strdup(buf);
-    if (owned == NULL) owned = strdup("null");
-
     mnet_response_t r = {
         .status = 200,
         .content_type = "application/json",
-        .body = owned,
-        .body_length = strlen(owned)
+        .body = buf,
+        .body_length = pos,
     };
     return r;
 }

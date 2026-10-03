@@ -62,6 +62,18 @@ static void test_mnet_jsonf_escape(void)
     printf("  PASS test_mnet_jsonf_escape\n");
 }
 
+static void test_mnet_jsonf_long_string(void)
+{
+    char long_str[5000];
+    memset(long_str, 'a', sizeof(long_str) - 1);
+    long_str[sizeof(long_str) - 1] = '\0';
+
+    mnet_response_t r = mnet_jsonf("{\"data\":\"%s\"}", long_str);
+    assert(r.status == 200);
+    assert(r.body_length > 5000);
+    printf("  PASS test_mnet_jsonf_long_string\n");
+}
+
 static void test_mnet_error(void)
 {
     mnet_response_t r = mnet_error(400, "bad request");
@@ -360,6 +372,7 @@ int main(void)
     test_mnet_json();
     test_mnet_jsonf();
     test_mnet_jsonf_escape();
+    test_mnet_jsonf_long_string();
     test_mnet_error();
     test_mnet_status();
     test_mnet_url_decode();

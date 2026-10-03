@@ -1,7 +1,9 @@
 project('mnet', 'c',
     version: '0.1.0',
-    default_options: ['c_std=c17', 'c_args=-D_POSIX_C_SOURCE=200112L']
+    default_options: ['c_std=c17']
 )
+
+add_project_arguments('-D_POSIX_C_SOURCE=200112L', language: 'c')
 
 if host_machine.system() == 'darwin'
     add_project_arguments('-D_DARWIN_C_SOURCE', language: 'c')
@@ -64,6 +66,7 @@ test('mnet_tests', test_mnet)
 # Install headers (libraries are installed by default)
 install_headers('include/mnet.h', 'include/mnet_app.h', 'include/mnet_request.h',
     'include/mnet_response.h', 'include/mnet_router.h', 'include/mnet_socket.h',
+    'include/mnet_compat.h',
     subdir: 'mnet')
 
 # pkg-config

@@ -5,9 +5,13 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#ifdef _WIN32
+typedef uintptr_t mnet_socket_t;
+#define MNET_INVALID_SOCKET INVALID_SOCKET
+#else
 typedef int mnet_socket_t;
-
 #define MNET_INVALID_SOCKET (-1)
+#endif
 
 mnet_socket_t mnet_tcp_listen(
     uint16_t port,

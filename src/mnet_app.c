@@ -4,23 +4,19 @@
 #include "mnet_response.h"
 #include "mnet_router.h"
 #include "mnet_compat.h"
+#include "mnet_internal.h"
 
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifndef _WIN32
 #include <signal.h>
-#include <strings.h>
-#include <sys/socket.h>
-#include <sys/time.h>
 #include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
 #endif
-#include <time.h>
 
 #define MNET_INITIAL_ROUTE_CAPACITY 8
 #define MNET_REQUEST_BUFFER_SIZE 8192
@@ -761,20 +757,13 @@ static mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
 static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 {
     if (app->timeout_seconds > 0) {
-        struct timeval tv;
-        tv.tv_sec = app->timeout_seconds;
-        tv.tv_usec = 0;
-        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        mnet_set_socket_timeout(client, app->timeout_seconds);
     }
 
     int keep_alive = 0;
     do {
         if (keep_alive && app->keep_alive_timeout > 0) {
-            struct timeval tv;
-            tv.tv_sec = app->keep_alive_timeout;
-            tv.tv_usec = 0;
-            setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            mnet_set_socket_timeout(client, app->keep_alive_timeout);
         }
 
         char buffer[MNET_REQUEST_BUFFER_SIZE];
@@ -891,11 +880,11 @@ static mnet_response_t static_handler(mnet_request_t *req)
     char fs_path[4096];
     snprintf(fs_path, sizeof(fs_path), "%s/%s", cfg->fs_path, rel);
 
-    char *real = realpath(fs_path, NULL);
+    char *real = mnet_realpath(fs_path);
     if (real == NULL) {
         return mnet_error(404, "not found");
     }
-    char *base_real = realpath(cfg->fs_path, NULL);
+    char *base_real = mnet_realpath(cfg->fs_path);
     if (base_real == NULL || strncmp(real, base_real, strlen(base_real)) != 0) {
         free(real);
         free(base_real);
@@ -903,40 +892,43 @@ static mnet_response_t static_handler(mnet_request_t *req)
     }
     free(base_real);
 
-    int fd = open(real, O_RDONLY);
-    if (fd == -1) {
+    FILE *fp = fopen(real, "rb");
+    if (fp == NULL) {
         free(real);
         return mnet_error(404, "not found");
     }
 
-    struct stat st;
-    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
-        close(fd);
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
         free(real);
         return mnet_error(404, "not found");
     }
 
-    char *data = malloc((size_t)st.st_size);
+    long file_size = ftell(fp);
+    if (file_size < 0) {
+        fclose(fp);
+        free(real);
+        return mnet_error(404, "not found");
+    }
+
+    rewind(fp);
+
+    char *data = malloc((size_t)file_size + 1);
     if (data == NULL) {
-        close(fd);
+        fclose(fp);
         free(real);
         return mnet_error(500, "internal server error");
     }
 
-    ssize_t total = 0;
-    while (total < (ssize_t)st.st_size) {
-        ssize_t n = read(fd, data + total, (size_t)st.st_size - (size_t)total);
-        if (n <= 0) break;
-        total += n;
-    }
-    close(fd);
+    size_t total = fread(data, 1, (size_t)file_size, fp);
+    fclose(fp);
     free(real);
 
     mnet_response_t r = {
         .status = 200,
         .content_type = mime_type(fs_path),
         .body = data,
-        .body_length = (size_t)total,
+        .body_length = total,
     };
     return r;
 }
@@ -1012,13 +1004,18 @@ int mnet_run(mnet_app_t *app, uint16_t port)
         return -1;
     }
 
-    /* Handle SIGINT/SIGTERM for graceful shutdown */
+    /* Handle SIGINT/SIGTERM for graceful shutdown. */
+#ifndef _WIN32
     struct sigaction sa = {0};
     sa.sa_handler = sig_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+#else
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
+#endif
 
     g_running_app = app;
 
@@ -1032,14 +1029,13 @@ int mnet_run(mnet_app_t *app, uint16_t port)
     while (app->running) {
         mnet_socket_t client = mnet_tcp_accept(server);
         if (client == MNET_INVALID_SOCKET) {
-            if (errno == EINTR) continue;
+            if (mnet_socket_errno() == MNET_EINTR) continue;
             break;
         }
 
         if (app->max_connections > 0) {
             while (g_active_connections >= app->max_connections && app->running) {
-                struct timespec ts = {0, 100000000}; /* 100ms */
-                nanosleep(&ts, NULL);
+                mnet_sleep_ms(100);
             }
             if (!app->running) {
                 mnet_close(client);
@@ -1047,10 +1043,10 @@ int mnet_run(mnet_app_t *app, uint16_t port)
             }
         }
 
-        __sync_fetch_and_add(&g_active_connections, 1);
+        mnet_atomic_inc(&g_active_connections);
         mnet_handle_client(app, client);
         mnet_close(client);
-        __sync_fetch_and_sub(&g_active_connections, 1);
+        mnet_atomic_dec(&g_active_connections);
     }
 
     mnet_close(server);

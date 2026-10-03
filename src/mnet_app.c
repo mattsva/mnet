@@ -496,6 +496,129 @@ static void send_method_not_allowed(mnet_socket_t client, const char *method)
     }
 }
 
+typedef struct {
+    char method[16];
+    char path[2048];
+    char path_only[2048];
+    char *query_string;
+    char *body;
+    size_t body_length;
+    int body_heap;
+    mnet_http_method_t method_enum;
+    request_extras_t extras;
+} parsed_request_t;
+
+static int parse_request(mnet_socket_t client, const char *buffer,
+    ssize_t received, parsed_request_t *out)
+{
+    out->method[0] = '\0';
+    out->path[0] = '\0';
+    out->path_only[0] = '\0';
+    out->query_string = NULL;
+    out->body = NULL;
+    out->body_length = 0;
+    out->body_heap = 0;
+    memset(&out->extras, 0, sizeof(out->extras));
+
+    char *body_ptr = NULL;
+    size_t body_len = 0;
+
+    if (parse_raw_request(buffer, out->method, out->path, &body_ptr, &body_len) != 0) {
+        return -1;
+    }
+
+    out->method_enum = mnet_parse_method(out->method);
+    if (out->method_enum == (mnet_http_method_t)-1) {
+        return -1;
+    }
+
+    char *full_body = NULL;
+    size_t full_body_len = 0;
+    if (read_full_body(client, buffer, received, &full_body, &full_body_len) != 0) {
+        return -1;
+    }
+    if (full_body != NULL) {
+        body_ptr = full_body;
+        body_len = full_body_len;
+        out->body_heap = 1;
+    }
+
+    out->body = body_ptr;
+    out->body_length = body_len;
+
+    const char *line_end = memchr(buffer, '\n',
+        strstr(buffer, "\r\n\r\n") ? strstr(buffer, "\r\n\r\n") - buffer : 0);
+    if (line_end) {
+        const char *hdr_section = line_end + 1;
+        parse_headers(hdr_section, &out->extras.header_names,
+            &out->extras.header_values, &out->extras.header_count);
+    }
+
+    char *qs = strchr(out->path, '?');
+    if (qs) {
+        size_t plen = (size_t)(qs - out->path);
+        memcpy(out->path_only, out->path, plen);
+        out->path_only[plen] = '\0';
+        qs++;
+        out->query_string = qs;
+        parse_query_string(qs, &out->extras.query_names,
+            &out->extras.query_values, &out->extras.query_count);
+    } else {
+        strcpy(out->path_only, out->path);
+    }
+
+    return 0;
+}
+
+static mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
+    const char **param_values, size_t param_count)
+{
+    mnet_route_t *route = mnet_find_route(app, parsed->method_enum,
+        parsed->path_only, param_values, MNET_MAX_PARAMS);
+
+    if (route == NULL) {
+        if (app->not_found_handler) {
+            mnet_request_t nf_req = {
+                .method = parsed->method,
+                .path = parsed->path_only,
+                .body = NULL,
+                .body_length = 0,
+                .extras = &parsed->extras,
+            };
+            return app->not_found_handler(&nf_req);
+        }
+        return (mnet_response_t){0};
+    }
+
+    parsed->extras.param_names = (char **)route->param_names;
+    parsed->extras.param_count = (int)param_count;
+    parsed->extras.param_values = (char **)param_values;
+
+    mnet_request_t req = {
+        .method = parsed->method,
+        .path = parsed->path_only,
+        .body = parsed->body,
+        .body_length = parsed->body_length,
+        .query_string = parsed->query_string ? parsed->query_string : "",
+        .path_param_names = (const char **)route->param_names,
+        .path_param_values = (const char **)param_values,
+        .path_param_count = (int)param_count,
+        .query_names = (const char **)parsed->extras.query_names,
+        .query_values = (const char **)parsed->extras.query_values,
+        .query_count = (int)parsed->extras.query_count,
+        .header_names = (const char **)parsed->extras.header_names,
+        .header_values = (const char **)parsed->extras.header_values,
+        .header_count = (int)parsed->extras.header_count,
+        .extras = &parsed->extras,
+        .user_data = route->user_data,
+    };
+
+    if (app->middleware) {
+        return app->middleware(&req, route->handler);
+    }
+    return route->handler(&req);
+}
+
 static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 {
     if (app->timeout_seconds > 0) {
@@ -511,138 +634,33 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
     if (received <= 0) return;
     buffer[received] = '\0';
 
-    /* Parse request line */
-    char method[16] = {0};
-    char path[2048] = {0};
-    char *body_ptr = NULL;
-    size_t body_len = 0;
-    int body_heap = 0;
-
-    if (parse_raw_request(buffer, method, path, &body_ptr, &body_len) != 0) {
-        send_method_not_allowed(client, method);
+    parsed_request_t parsed;
+    if (parse_request(client, buffer, received, &parsed) != 0) {
+        send_method_not_allowed(client, parsed.method);
         return;
     }
 
-    /* Parse HTTP method */
-    mnet_http_method_t hm = mnet_parse_method(method);
-    if (hm == (mnet_http_method_t)-1) {
-        send_method_not_allowed(client, method);
-        return;
-    }
-
-    /* Read full body if Content-Length is present */
-    char *full_body = NULL;
-    size_t full_body_len = 0;
-    if (read_full_body(client, buffer, received, &full_body, &full_body_len) != 0) {
-        send_method_not_allowed(client, method);
-        return;
-    }
-    if (full_body != NULL) {
-        body_ptr = full_body;
-        body_len = full_body_len;
-        body_heap = 1;
-    }
-
-    request_extras_t extras = {0};
-
-    /* Parse headers */
-    const char *line_end = memchr(buffer, '\n',
-        strstr(buffer, "\r\n\r\n") ? strstr(buffer, "\r\n\r\n") - buffer : 0);
-    if (line_end) {
-        const char *hdr_section = line_end + 1;
-        parse_headers(hdr_section, &extras.header_names, &extras.header_values,
-            &extras.header_count);
-    }
-
-    /* Parse query string */
-    char *qs = strchr(path, '?');
-    char path_only[2048];
-    if (qs) {
-        size_t plen = (size_t)(qs - path);
-        memcpy(path_only, path, plen);
-        path_only[plen] = '\0';
-        qs++;
-        parse_query_string(qs, &extras.query_names, &extras.query_values,
-            &extras.query_count);
-    } else {
-        strcpy(path_only, path);
-    }
-
-    /* Find route */
     const char *param_values[MNET_MAX_PARAMS] = {0};
-    mnet_route_t *route = mnet_find_route(app, hm, path_only,
-        param_values, MNET_MAX_PARAMS);
+    size_t param_count = 0;
+    if (parsed.extras.param_names) {
+        while (parsed.extras.param_names[param_count] != NULL) param_count++;
+    }
 
-    mnet_response_t response = {0};
+    mnet_response_t response = dispatch(app, &parsed, param_values, param_count);
 
-    if (route == NULL) {
-        if (app->not_found_handler) {
-            mnet_request_t nf_req = {
-                .method = method,
-                .path = path_only,
-                .body = NULL,
-                .body_length = 0,
-                .extras = &extras,
-            };
-            response = app->not_found_handler(&nf_req);
-            if (app_debug) {
-                fprintf(stderr, "[mnet] %d %s %s\n",
-                    response.status, method, path_only);
-            }
-            send_response(client, &response, 0);
-        } else {
-            send_not_found(client, path_only);
-        }
+    if (response.status == 0 && app->not_found_handler == NULL) {
+        send_not_found(client, parsed.path_only);
     } else {
-        /* Build request struct */
-        size_t pc = 0;
-        if (route->param_names) {
-            while (route->param_names[pc] != NULL) pc++;
-        }
-
-        extras.param_names = (char **)route->param_names;
-        extras.param_count = (int)pc;
-        extras.param_values = (char **)param_values;
-
-        mnet_request_t req = {
-            .method = method,
-            .path = path_only,
-            .body = body_ptr,
-            .body_length = body_len,
-            .query_string = qs ? qs : "",
-            .path_param_names = (const char **)route->param_names,
-            .path_param_values = (const char **)param_values,
-            .path_param_count = (int)pc,
-            .query_names = (const char **)extras.query_names,
-            .query_values = (const char **)extras.query_values,
-            .query_count = (int)extras.query_count,
-            .header_names = (const char **)extras.header_names,
-            .header_values = (const char **)extras.header_values,
-            .header_count = (int)extras.header_count,
-            .extras = &extras,
-            .user_data = route->user_data,
-        };
-
-        /* Call handler, optionally through middleware */
-        if (app->middleware) {
-            response = app->middleware(&req, route->handler);
-        } else {
-            response = route->handler(&req);
-        }
-
-        /* Debug logging */
         if (app_debug) {
             fprintf(stderr, "[mnet] %d %s %s\n",
-                response.status, method, path_only);
+                response.status, parsed.method, parsed.path_only);
         }
-
-        send_response(client, &response, hm == MNET_HTTP_HEAD);
-
-        mnet_match_params_free(param_values, (int)pc);
+        send_response(client, &response, parsed.method_enum == MNET_HTTP_HEAD);
     }
 
-    free_extras(&extras);
-    if (body_heap) free(body_ptr);
+    mnet_match_params_free(param_values, (int)param_count);
+    free_extras(&parsed.extras);
+    if (parsed.body_heap) free(parsed.body);
 }
 
 static mnet_app_t *g_running_app = NULL;

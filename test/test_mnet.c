@@ -266,6 +266,7 @@ static void test_mnet_route_match_no_match(void)
     const char *values[4] = {0};
     int n = mnet_route_match(&route, "/api/users", values, 4);
     assert(n == 0);
+    (void)n;
     printf("  PASS test_mnet_route_match_no_match\n");
 }
 
@@ -280,6 +281,7 @@ static void test_mnet_route_match_static(void)
     const char *values[4] = {0};
     int n = mnet_route_match(&route, "/", values, 4);
     assert(n == 0); /* no params extracted */
+    (void)n;
     printf("  PASS test_mnet_route_match_static\n");
 }
 
@@ -294,6 +296,7 @@ static void test_mnet_route_match_partial_free(void)
     const char *values[4] = {0};
     int n = mnet_route_match(&route, "/api/users/42", values, 4);
     assert(n == 0);
+    (void)n;
     printf("  PASS test_mnet_route_match_partial_free\n");
 }
 
@@ -520,6 +523,7 @@ static void test_mnet_jsonf_unicode_escape(void)
 static void test_mnet_url_decode_ex(void)
 {
     char out[64];
+    (void)out;
 
     /* normal */
     assert(mnet_url_decode_ex("hello", 5, out, sizeof(out)) == 5);
@@ -580,16 +584,16 @@ static void test_mnet_url_decode_malformed(void)
     assert(out[0] == '\0');
 
     /* exact fit succeeds */
-    char small[4];
-    n = mnet_url_decode(small, sizeof(small), "abc");
+    char buf4[4];
+    n = mnet_url_decode(buf4, sizeof(buf4), "abc");
     assert(n == 3);
-    assert(strcmp(small, "abc") == 0);
+    assert(strcmp(buf4, "abc") == 0);
 
     /* overflow refuses */
-    char tiny[3];
-    n = mnet_url_decode(tiny, sizeof(tiny), "abcd");
+    char buf3[3];
+    n = mnet_url_decode(buf3, sizeof(buf3), "abcd");
     assert(n == 0);
-    assert(tiny[0] == '\0');
+    assert(buf3[0] == '\0');
 
     printf("  PASS test_mnet_url_decode_malformed\n");
 }
@@ -641,6 +645,7 @@ static void test_route_match_allocation_failure_shape(void)
     const char *values[4] = {0};
     int n = mnet_route_match(&route, "/a/1/b/2", values, 1);
     assert(n == 2);              /* both segments matched */
+    (void)n;
     assert(values[0] != NULL);   /* only one value stored (max_values=1) */
     assert(values[1] == NULL);
     mnet_match_params_free(values, 1);

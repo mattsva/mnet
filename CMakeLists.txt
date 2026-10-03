@@ -7,6 +7,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # The same warning levels as the Makefile: everything on, warnings are errors.
 if(MSVC)
     add_compile_options(/W4 /WX)
+    # MSVC warns (C4996) about standard C functions it considers "unsafe POSIX
+    # names" — sscanf, strcpy, strdup, etc. These are false positives for
+    # portable C code; suppress them so /WX does not escalate them to errors.
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()

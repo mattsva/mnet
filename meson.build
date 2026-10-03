@@ -6,7 +6,11 @@ project('mnet', 'c',
 # The same warning levels as the Makefile: everything on, warnings are errors.
 cc = meson.get_compiler('c')
 warning_flags = ['-Wall', '-Wextra', '-Wpedantic', '-Werror']
-if cc.get_id() != 'msvc'
+if cc.get_id() == 'msvc'
+    add_project_arguments(['/W4', '/WX'], language: 'c')
+    # Suppress false-positive C4996 deprecation warnings for standard C functions.
+    add_project_arguments(['/D_CRT_SECURE_NO_WARNINGS', '/D_CRT_NONSTDC_NO_DEPRECATE'], language: 'c')
+else
     add_project_arguments(warning_flags, language: 'c')
 endif
 

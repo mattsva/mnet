@@ -65,7 +65,7 @@ jobs:
           mkdir build && cd build
           cmake ..
           make mnet_shared
-          cp libmnet.dylib.0.1.0 libmnet-macos.dylib
+          cp libmnet.0.1.0.dylib libmnet-macos.dylib
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

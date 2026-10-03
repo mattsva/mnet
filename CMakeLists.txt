@@ -4,6 +4,9 @@ project(mnet VERSION 0.1.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 add_compile_definitions(_POSIX_C_SOURCE=200112L)
+if(APPLE)
+    add_compile_definitions(_DARWIN_C_SOURCE)
+endif()
 
 # Source files
 set(MNET_SOURCES
@@ -27,6 +30,9 @@ set_target_properties(mnet_shared PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION 1
 )
+if(WIN32)
+    target_link_libraries(mnet_shared ws2_32)
+endif()
 
 # Examples
 add_executable(example_http_server example/example_http_server.c)

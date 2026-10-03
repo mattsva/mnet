@@ -1,11 +1,43 @@
+#define _GNU_SOURCE
 #include "mnet_socket.h"
+#include "mnet_compat.h"
+#include "mnet_internal.h"
 
 #include <errno.h>
-#include <netdb.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifdef _WIN32
+#include <ws2tcpip.h>
+#else
+#include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
+
+/*
+ * Windows requires a process-wide Winsock initialisation before any socket
+ * call. It is done lazily on the first listen and never torn down, which is
+ * fine for a server that lives for the whole process lifetime.
+ */
+#ifdef _WIN32
+static int mnet_wsa_init(void)
+{
+    static int started = 0;
+
+    if (!started) {
+        WSADATA data;
+
+        if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
+            return -1;
+        }
+
+        started = 1;
+    }
+
+    return 0;
+}
+#endif
 
 mnet_socket_t mnet_tcp_listen(
     uint16_t port,
@@ -15,6 +47,12 @@ mnet_socket_t mnet_tcp_listen(
         errno = EINVAL;
         return MNET_INVALID_SOCKET;
     }
+
+#ifdef _WIN32
+    if (mnet_wsa_init() != 0) {
+        return MNET_INVALID_SOCKET;
+    }
+#endif
 
     char port_string[6];
 
@@ -56,38 +94,50 @@ mnet_socket_t mnet_tcp_listen(
          entry != NULL;
          entry = entry->ai_next) {
 
-        int fd = socket(
+        mnet_socket_t fd = socket(
             entry->ai_family,
             entry->ai_socktype,
             entry->ai_protocol
         );
 
-        if (fd == -1) {
+        if (fd == MNET_INVALID_SOCKET) {
             continue;
         }
 
         int reuse = 1;
 
+#ifdef _WIN32
+        if (setsockopt(
+                fd,
+                SOL_SOCKET,
+                SO_REUSEADDR,
+                (const char *)&reuse,
+                sizeof(reuse)) != 0) {
+            mnet_socket_close(fd);
+            continue;
+        }
+#else
         if (setsockopt(
                 fd,
                 SOL_SOCKET,
                 SO_REUSEADDR,
                 &reuse,
-                sizeof(reuse)) == -1) {
-            close(fd);
+                sizeof(reuse)) != 0) {
+            mnet_socket_close(fd);
             continue;
         }
+#endif
 
         if (bind(
                 fd,
                 entry->ai_addr,
-                entry->ai_addrlen) == -1) {
-            close(fd);
+                (int)entry->ai_addrlen) != 0) {
+            mnet_socket_close(fd);
             continue;
         }
 
-        if (listen(fd, backlog) == -1) {
-            close(fd);
+        if (listen(fd, backlog) != 0) {
+            mnet_socket_close(fd);
             continue;
         }
 
@@ -120,10 +170,10 @@ ssize_t mnet_send(
         return -1;
     }
 
-    return send(
+    return (ssize_t)send(
         socket,
-        data,
-        length,
+        (const char *)data,
+        (int)length,
         0
     );
 }
@@ -138,10 +188,10 @@ ssize_t mnet_recv(
         return -1;
     }
 
-    return recv(
+    return (ssize_t)recv(
         socket,
-        buffer,
-        length,
+        (char *)buffer,
+        (int)length,
         0
     );
 }
@@ -150,6 +200,6 @@ void mnet_close(
     mnet_socket_t socket)
 {
     if (socket != MNET_INVALID_SOCKET) {
-        close(socket);
+        mnet_socket_close(socket);
     }
 }

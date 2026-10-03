@@ -9,6 +9,13 @@ if host_machine.system() == 'darwin'
     add_project_arguments('-D_DARWIN_C_SOURCE', language: 'c')
 endif
 
+# Optional sanitizer build: meson setup build -Dsanitize=true
+if get_option('sanitize')
+    add_project_arguments('-fsanitize=address,undefined',
+        '-fno-omit-frame-pointer', '-g', language: 'c')
+    add_project_link_arguments('-fsanitize=address,undefined', language: 'c')
+endif
+
 # Source files
 mnet_sources = files(
     'src/mnet.c',

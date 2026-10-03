@@ -115,7 +115,10 @@ Serves files from `/var/www/files` under the `/static` URL prefix. Path traversa
 mnet_set_timeout(app, 30);
 ```
 
-Sets a read/write timeout in seconds on client connections. Without this, a slow or malicious client can hang the server indefinitely.
+Sets a read/write timeout in seconds on client connections. Without this, a slow
+or malicious client can hang the server indefinitely. A 30 second timeout is
+applied by default even if this is never called; pass a value to override it, or
+`0` to fall back to the default.
 
 ### Keep-alive connections
 
@@ -281,14 +284,15 @@ A full-featured example with both HTML pages and a JSON API, including authentic
 make test
 ```
 
-The suite is a single self-contained harness in `test/test_mnet.c` (38 cases) and
-covers routing, path and query parameters, headers, cookies, body parsing, JSON
-escaping, chunked responses, response-free paths, and the configuration limits.
-It runs clean under Valgrind. It does not currently drive a real socket end to
-end, so HTTP-level integration behaviour is not covered.
+The suite has two parts. `test/test_mnet.c` (43 cases) covers the pure
+functions: routing, path and query parameters, headers, cookies, JSON escaping,
+URL decoding, the header validators, chunked responses, response-free paths and
+the configuration limits. `test/test_http.c` (13 cases) drives the real server
+over a loopback socket, covering request parsing, method validation, body
+bounds, header limits and static-file handling including traversal attempts.
 
-The same suite runs in CI against Make, CMake, and Meson, on Linux, macOS, and
-Windows.
+Both run clean under Valgrind and AddressSanitizer. The same suites run in CI
+against Make, CMake, and Meson, on Linux, macOS, and Windows.
 
 ## Makefile targets
 
@@ -311,10 +315,12 @@ Windows.
 mnet is a small framework and leaves several operational concerns to the caller.
 If you expose a server to a network you do not fully trust, read this section.
 
-**Set a timeout.** I/O is blocking and the server is single-threaded: it handles
-one connection at a time. A client that connects and then sends nothing holds the
-server for as long as the socket stays open. Call `mnet_set_timeout(app, seconds)`
-to bound that. There is no timeout by default.
+**Timeouts have a default.** I/O is blocking and the server is single-threaded:
+it handles one connection at a time. A client that connects and then sends
+nothing would otherwise hold the server indefinitely, so a 30 second timeout is
+applied by default. `mnet_set_timeout(app, seconds)` overrides it (use `0` to
+get the default back), and `mnet_set_keep_alive_timeout()` sets the separate idle
+timeout for reused keep-alive connections.
 
 **Cap concurrent connections.** `mnet_set_max_connections(app, n)` rejects new
 connections once `n` are active. Without it there is no limit. Note that this is a
@@ -324,19 +330,40 @@ client from many legitimate ones.
 **There is no TLS.** mnet speaks plaintext HTTP. Terminate TLS in a reverse proxy
 (nginx, Caddy, stunnel) in front of it if you need HTTPS.
 
-**Header size is bounded by the read buffer.** The request line and headers must
-fit in the 8 KB read buffer. A request whose headers exceed it fails to parse and
-the connection is closed. This is an implicit limit, not a configurable one; keep
-that in mind if you expect very large cookies or a long list of headers.
+**Header size is bounded.** The request line and headers must fit in the 8 KB read
+buffer. A request whose headers do not fit is rejected with `431` and the
+connection is closed; headers are never silently truncated, and a header block
+larger than the buffer is not parsed as if it were complete. The number of
+headers is capped at 100. These limits are fixed rather than configurable.
 
 **Body size is capped.** Request bodies are limited to 16 MB by default and
-rejected above that; adjust with `mnet_set_max_body_size()`. Bodies are allocated
-on the heap, so the cap also bounds per-request memory use.
+rejected above that with `413`; adjust with `mnet_set_max_body_size()`. A
+`Content-Length` that is not a plain decimal number within the limit is rejected
+with `400`, and any body bytes beyond the declared length are ignored rather than
+copied. Bodies are allocated on the heap, so the cap also bounds per-request
+memory use.
+
+**Malformed requests are answered, not ignored.** An unparseable request line
+yields `400`, an unknown method yields `405`, and a body over the cap yields
+`413`.
+
+**Response headers cannot be injected.** A `Content-Type` containing CR or LF is
+rejected rather than emitted, so a handler cannot split the response. If you add
+your own header-emitting code, validate values with
+`mnet_header_value_valid()` and names with `mnet_header_name_valid()`.
 
 **Static file serving is traversal-checked.** `mnet_static()` resolves the
 requested path with `realpath()` and verifies it stays under the configured root,
-rejecting escapes with 403. Do not serve a directory whose contents you would not
-expose.
+rejecting escapes with `403`. The check is boundary-aware, so a sibling directory
+whose name merely shares a prefix with the root (for example `/var/www2` when the
+root is `/var/www`) is not reachable. Symlinks are resolved before the check, so
+a symlink that leaves the root is rejected too. Do not serve a directory whose
+contents you would not expose.
+
+**URL decoding is strict.** `mnet_url_decode_ex()` rejects malformed or truncated
+percent escapes and `%00` instead of truncating, and never writes past the
+destination capacity. Path parameters and query values that fail to decode are
+reported as empty rather than partially decoded.
 
 **Handlers run on a single thread.** Do not block inside a handler — a slow
 handler stalls every other client.

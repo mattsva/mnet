@@ -50,7 +50,10 @@ void mnet_set_timeout(mnet_app_t *app, int seconds);
 /* Maximum number of concurrent connections. 0 = unlimited (default). */
 void mnet_set_max_connections(mnet_app_t *app, int max_connections);
 
-/* Keep-alive idle timeout in seconds. 0 = no timeout (default). */
+/* Socket read/write timeout in seconds. 0 = 30 s default. */
+void mnet_set_timeout(mnet_app_t *app, int seconds);
+
+/* Keep-alive idle timeout in seconds. 0 = 30 s default. */
 void mnet_set_keep_alive_timeout(mnet_app_t *app, int seconds);
 
 /* Maximum request body size in bytes. 0 = 16 MB (default). */

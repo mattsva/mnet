@@ -10,6 +10,13 @@ if(APPLE)
     add_compile_definitions(_DARWIN_C_SOURCE)
 endif()
 
+# Optional hardening/sanitizer build: -DMNET_SANITIZE=ON
+option(MNET_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+if(MNET_SANITIZE)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
 # Source files
 set(MNET_SOURCES
     src/mnet.c

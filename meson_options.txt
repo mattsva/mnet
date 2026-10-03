@@ -1,0 +1,2 @@
+option('sanitize', type: 'boolean', value: false,
+    description: 'Build with AddressSanitizer and UndefinedBehaviorSanitizer')

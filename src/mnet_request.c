@@ -62,3 +62,15 @@ const char *mnet_request_header(const mnet_request_t *request, const char *name)
     }
     return NULL;
 }
+
+const char *mnet_request_cookie(const mnet_request_t *request, const char *name)
+{
+    if (request == NULL || name == NULL) return NULL;
+    if (request->cookie_names == NULL) return NULL;
+
+    for (int i = 0; i < request->cookie_count; i++) {
+        if (strcmp(request->cookie_names[i], name) == 0)
+            return request->cookie_values[i];
+    }
+    return NULL;
+}

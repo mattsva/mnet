@@ -199,6 +199,19 @@ static void test_mnet_request_body(void)
     printf("  PASS test_mnet_request_body\n");
 }
 
+static void test_mnet_request_cookie(void)
+{
+    mnet_request_t req = {0};
+    req.cookie_names = (const char *[]){"session", "theme", NULL};
+    req.cookie_values = (const char *[]){"abc123", "dark", NULL};
+    req.cookie_count = 2;
+
+    assert(strcmp(MNET_COOKIE(&req, "session"), "abc123") == 0);
+    assert(strcmp(MNET_COOKIE(&req, "theme"), "dark") == 0);
+    assert(MNET_COOKIE(&req, "missing") == NULL);
+    printf("  PASS test_mnet_request_cookie\n");
+}
+
 
 static void test_mnet_route_match_simple(void)
 {
@@ -382,6 +395,7 @@ int main(void)
     test_mnet_request_query();
     test_mnet_request_header();
     test_mnet_request_body();
+    test_mnet_request_cookie();
 
     test_mnet_route_match_simple();
     test_mnet_route_match_multi();

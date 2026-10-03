@@ -386,6 +386,71 @@ static int read_full_body(mnet_socket_t client, const char *buffer,
     return 0;
 }
 
+static void parse_cookies(const char *cookie_header,
+    char ***out_names, char ***out_values, size_t *out_count)
+{
+    if (cookie_header == NULL || *cookie_header == '\0') {
+        *out_names = NULL;
+        *out_values = NULL;
+        *out_count = 0;
+        return;
+    }
+
+    size_t count = 1;
+    for (const char *p = cookie_header; *p; p++) {
+        if (*p == ';') count++;
+    }
+
+    char **names = malloc(count * sizeof(char *));
+    char **values = malloc(count * sizeof(char *));
+    if (names == NULL || values == NULL) {
+        free(names); free(values);
+        *out_names = NULL; *out_values = NULL; *out_count = 0;
+        return;
+    }
+
+    char *copy = strdup(cookie_header);
+    if (copy == NULL) {
+        free(names); free(values);
+        *out_names = NULL; *out_values = NULL; *out_count = 0;
+        return;
+    }
+
+    size_t idx = 0;
+    char *save = NULL;
+    char *token = strtok_r(copy, ";", &save);
+    while (token != NULL && idx < count) {
+        while (*token == ' ') token++;
+        char *eq = strchr(token, '=');
+        if (eq) {
+            *eq = '\0';
+            const char *v = eq + 1;
+            while (*v == ' ') v++;
+            names[idx] = strdup(token);
+            values[idx] = strdup(v);
+        } else {
+            names[idx] = strdup(token);
+            values[idx] = strdup("");
+        }
+        if (names[idx] == NULL || values[idx] == NULL) {
+            free(names[idx]); free(values[idx]);
+            for (size_t j = 0; j < idx; j++) {
+                free(names[j]); free(values[j]);
+            }
+            free(names); free(values); free(copy);
+            *out_names = NULL; *out_values = NULL; *out_count = 0;
+            return;
+        }
+        idx++;
+        token = strtok_r(NULL, ";", &save);
+    }
+    free(copy);
+
+    *out_names = names;
+    *out_values = values;
+    *out_count = idx;
+}
+
 static void free_extras(request_extras_t *e)
 {
     if (e == NULL) return;
@@ -404,6 +469,12 @@ static void free_extras(request_extras_t *e)
     }
     free(e->header_names);
     free(e->header_values);
+    for (size_t i = 0; i < e->cookie_count; i++) {
+        free(e->cookie_names[i]);
+        free(e->cookie_values[i]);
+    }
+    free(e->cookie_names);
+    free(e->cookie_values);
     memset(e, 0, sizeof(*e));
 }
 
@@ -552,6 +623,15 @@ static int parse_request(mnet_socket_t client, const char *buffer,
         const char *hdr_section = line_end + 1;
         parse_headers(hdr_section, &out->extras.header_names,
             &out->extras.header_values, &out->extras.header_count);
+
+        for (size_t i = 0; i < out->extras.header_count; i++) {
+            if (strcasecmp(out->extras.header_names[i], "Cookie") == 0) {
+                parse_cookies(out->extras.header_values[i],
+                    &out->extras.cookie_names, &out->extras.cookie_values,
+                    &out->extras.cookie_count);
+                break;
+            }
+        }
     }
 
     char *qs = strchr(out->path, '?');
@@ -609,6 +689,9 @@ static mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
         .header_names = (const char **)parsed->extras.header_names,
         .header_values = (const char **)parsed->extras.header_values,
         .header_count = (int)parsed->extras.header_count,
+        .cookie_names = (const char **)parsed->extras.cookie_names,
+        .cookie_values = (const char **)parsed->extras.cookie_values,
+        .cookie_count = (int)parsed->extras.cookie_count,
         .extras = &parsed->extras,
         .user_data = route->user_data,
     };

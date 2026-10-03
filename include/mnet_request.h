@@ -13,6 +13,9 @@ typedef struct {
     char **header_names;
     char **header_values;
     size_t header_count;
+    char **cookie_names;
+    char **cookie_values;
+    size_t cookie_count;
 } request_extras_t;
 
 typedef struct mnet_request {
@@ -35,6 +38,10 @@ typedef struct mnet_request {
     const char **header_names;
     const char **header_values;
 
+    int         cookie_count;
+    const char **cookie_names;
+    const char **cookie_values;
+
     request_extras_t *extras;
     void *user_data;
 } mnet_request_t;
@@ -53,5 +60,9 @@ size_t mnet_request_body_length(const mnet_request_t *request);
 const char *mnet_request_param(const mnet_request_t *request, const char *name);
 const char *mnet_request_query(const mnet_request_t *request, const char *name);
 const char *mnet_request_header(const mnet_request_t *request, const char *name);
+
+const char *mnet_request_cookie(const mnet_request_t *request, const char *name);
+
+#define MNET_COOKIE(req, name)       mnet_request_cookie(req, name)
 
 #endif

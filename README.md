@@ -112,6 +112,12 @@ Path parameters and query values are URL-decoded automatically (`%20` → space,
 const char *auth = MNET_HEADER(req, "Authorization");
 ```
 
+**Cookies**:
+
+```c
+const char *session = MNET_COOKIE(req, "session");
+```
+
 **Body**:
 
 ```c

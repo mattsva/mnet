@@ -1,7 +1,6 @@
 #define _GNU_SOURCE
 #include "mnet_app.h"
 #include "mnet_socket.h"
-#include "mnet_socket.h"
 #include "mnet_response.h"
 #include "mnet_router.h"
 #include "mnet_compat.h"
@@ -16,12 +15,12 @@
 #include <signal.h>
 #include <strings.h>
 #include <sys/socket.h>
-#endif
-#include <sys/stat.h>
 #include <sys/time.h>
-#include <time.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#endif
+#include <time.h>
 
 #define MNET_INITIAL_ROUTE_CAPACITY 8
 #define MNET_REQUEST_BUFFER_SIZE 8192

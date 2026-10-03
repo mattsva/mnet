@@ -5,16 +5,13 @@
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #include <windows.h>
+    #include <stdint.h>
 
     typedef int64_t ssize_t;
 
     #define strcasecmp _stricmp
     #define strdup _strdup
     #define strtok_r strtok_s
-
-    #ifndef _DARWIN_C_SOURCE
-        #define _DARWIN_C_SOURCE
-    #endif
 
     static inline char *strcasestr(const char *haystack, const char *needle)
     {

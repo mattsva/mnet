@@ -15,6 +15,7 @@ static int app_debug = 0;
 
 #define MNET_INITIAL_ROUTE_CAPACITY 8
 #define MNET_REQUEST_BUFFER_SIZE 8192
+#define MNET_MAX_BODY_SIZE (16 * 1024 * 1024)
 #define MNET_MAX_PARAMS 16
 #define MNET_MAX_HEADERS 32
 #define MNET_MAX_QUERY 16
@@ -311,6 +312,67 @@ static int parse_raw_request(
 
 
 
+static int read_full_body(mnet_socket_t client, const char *buffer,
+    ssize_t initial_received, char **body_out, size_t *body_len_out)
+{
+    const char *sep = strstr(buffer, "\r\n\r\n");
+    const char *sep2 = strstr(buffer, "\n\n");
+    const char *end_of_headers = sep ? sep : (sep2 ? sep2 : NULL);
+    if (end_of_headers == NULL) return -1;
+
+    const char *body_start = end_of_headers + (sep ? 4 : 2);
+    size_t initial_body_len = (size_t)(initial_received - (body_start - buffer));
+
+    /* Find Content-Length header */
+    const char *cl_header = NULL;
+    const char *search = buffer;
+    while ((search = strcasestr(search, "content-length:")) != NULL) {
+        const char *line_start = search;
+        while (line_start > buffer && *(line_start - 1) != '\n') line_start--;
+        if (line_start == buffer || *(line_start - 1) == '\n') {
+            cl_header = search;
+            break;
+        }
+        search += 16;
+    }
+
+    size_t content_length = 0;
+    if (cl_header) {
+        const char *val = cl_header + 16;
+        while (*val == ' ' || *val == '\t') val++;
+        content_length = (size_t)strtoul(val, NULL, 10);
+    }
+
+    if (content_length == 0) {
+        *body_out = (char *)body_start;
+        *body_len_out = initial_body_len;
+        return 0;
+    }
+
+    if (content_length > MNET_MAX_BODY_SIZE) return -1;
+
+    char *full_body = malloc(content_length + 1);
+    if (full_body == NULL) return -1;
+
+    memcpy(full_body, body_start, initial_body_len);
+    size_t total_received = initial_body_len;
+
+    while (total_received < content_length) {
+        ssize_t n = mnet_recv(client, full_body + total_received,
+            content_length - total_received);
+        if (n <= 0) {
+            free(full_body);
+            return -1;
+        }
+        total_received += (size_t)n;
+    }
+
+    full_body[content_length] = '\0';
+    *body_out = full_body;
+    *body_len_out = content_length;
+    return 0;
+}
+
 static void free_extras(request_extras_t *e)
 {
     if (e == NULL) return;
@@ -432,6 +494,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
     char path[2048] = {0};
     char *body_ptr = NULL;
     size_t body_len = 0;
+    int body_heap = 0;
 
     if (parse_raw_request(buffer, method, path, &body_ptr, &body_len) != 0) {
         send_method_not_allowed(client, method);
@@ -443,6 +506,19 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
     if (hm == (mnet_http_method_t)-1) {
         send_method_not_allowed(client, method);
         return;
+    }
+
+    /* Read full body if Content-Length is present */
+    char *full_body = NULL;
+    size_t full_body_len = 0;
+    if (read_full_body(client, buffer, received, &full_body, &full_body_len) != 0) {
+        send_method_not_allowed(client, method);
+        return;
+    }
+    if (full_body != NULL) {
+        body_ptr = full_body;
+        body_len = full_body_len;
+        body_heap = 1;
     }
 
     request_extras_t extras = {0};
@@ -539,6 +615,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
     }
 
     free_extras(&extras);
+    if (body_heap) free(body_ptr);
 }
 
 static mnet_app_t *g_running_app = NULL;

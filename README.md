@@ -77,6 +77,8 @@ const char *body = MNET_BODY(req);
 size_t body_len = MNET_BODY_LEN(req);
 ```
 
+The framework reads the full request body based on the `Content-Length` header. Bodies larger than 16 MB are rejected.
+
 ### Response helpers
 
 ```c

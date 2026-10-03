@@ -194,6 +194,13 @@ return mnet_status(201, "created");        // custom status + text body
 return mnet_chunked(200, "text/html", html, html_len); // chunked transfer
 ```
 
+All response helpers allocate the body with `malloc`. The server frees it automatically after sending. If you create responses outside of request handling (e.g., for testing), free them with:
+
+```c
+mnet_response_t r = mnet_text("hello");
+mnet_response_free(&r);
+```
+
 ### Path parameters
 
 Routes like `/api/users/:id` or `/api/posts/:post_id/comments/:comment_id` are supported. The router extracts the parameter values and makes them available via `MNET_PARAM(req, "name")`.

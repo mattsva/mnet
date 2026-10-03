@@ -95,7 +95,6 @@ size_t mnet_json_escape(
                 break;
             default:
                 if ((unsigned char)*p < 0x20) {
-                    /* \uXXXX - keep simple: just skip for now */
                     if (pos + 6 <= out_size - 1) {
                         pos += snprintf(out + pos, 7, "\\u%04x", (unsigned char)*p);
                     }
@@ -225,12 +224,25 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
             f++; /* skip 's' */
             const char *s = va_arg(args, const char *);
             if (s == NULL) s = "(null)";
-            char escaped[4096];
-            size_t elen = mnet_json_escape(escaped, sizeof(escaped), s);
+            size_t slen = strlen(s);
+            size_t escaped_cap = slen * 6 + 1;
+            char *escaped = malloc(escaped_cap);
+            if (escaped == NULL) {
+                free(buf);
+                mnet_response_t r = {
+                    .status = 200,
+                    .content_type = "application/json",
+                    .body = strdup("null"),
+                    .body_length = 4,
+                };
+                return r;
+            }
+            size_t elen = mnet_json_escape(escaped, escaped_cap, s);
             while (pos + elen + 1 >= cap) {
                 cap *= 2;
                 char *nb = realloc(buf, cap);
                 if (nb == NULL) {
+                    free(escaped);
                     free(buf);
                     mnet_response_t r = {
                         .status = 200,
@@ -244,6 +256,7 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
             }
             memcpy(buf + pos, escaped, elen);
             pos += elen;
+            free(escaped);
             continue;
         }
 
@@ -349,4 +362,14 @@ mnet_response_t mnet_chunked(int status, const char *content_type,
         .chunked = 1,
     };
     return r;
+}
+
+void mnet_response_free(mnet_response_t *response)
+{
+    if (response == NULL) return;
+    if (response->body != NULL && !response->chunked) {
+        free((void *)response->body);
+        response->body = NULL;
+    }
+    response->body_length = 0;
 }

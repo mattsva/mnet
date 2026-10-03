@@ -805,6 +805,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
             }
             send_response(client, &response, parsed.method_enum == MNET_HTTP_HEAD,
                 keep_alive);
+            mnet_response_free(&response);
         }
 
         mnet_match_params_free(param_values, (int)param_count);

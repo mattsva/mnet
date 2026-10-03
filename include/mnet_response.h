@@ -22,6 +22,8 @@ mnet_response_t mnet_status(int status, const char *body);
 mnet_response_t mnet_chunked(int status, const char *content_type,
     const void *body, size_t body_length);
 
+void mnet_response_free(mnet_response_t *response);
+
 size_t mnet_url_decode(char *out, size_t out_size, const char *s);
 
 size_t mnet_json_escape(

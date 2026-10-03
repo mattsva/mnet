@@ -64,6 +64,8 @@ const char *id = MNET_PARAM(req, "id");
 const char *q = MNET_QUERY(req, "search");
 ```
 
+Path parameters and query values are URL-decoded automatically (`%20` → space, `+` → space, etc.).
+
 **Headers** (case-insensitive):
 
 ```c

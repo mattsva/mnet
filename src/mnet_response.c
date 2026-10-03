@@ -7,6 +7,36 @@
 #include <stdlib.h>
 #include <string.h>
 
+size_t mnet_url_decode(char *out, size_t out_size, const char *s)
+{
+    if (s == NULL) return 0;
+    size_t pos = 0;
+    for (const char *p = s; *p && pos < out_size - 1; p++) {
+        if (*p == '%' && p[1] && p[2]) {
+            int hi = -1, lo = -1;
+            char c1 = p[1], c2 = p[2];
+            if (c1 >= '0' && c1 <= '9') hi = c1 - '0';
+            else if (c1 >= 'a' && c1 <= 'f') hi = c1 - 'a' + 10;
+            else if (c1 >= 'A' && c1 <= 'F') hi = c1 - 'A' + 10;
+            if (c2 >= '0' && c2 <= '9') lo = c2 - '0';
+            else if (c2 >= 'a' && c2 <= 'f') lo = c2 - 'a' + 10;
+            else if (c2 >= 'A' && c2 <= 'F') lo = c2 - 'A' + 10;
+            if (hi >= 0 && lo >= 0) {
+                out[pos++] = (char)((hi << 4) | lo);
+                p += 2;
+            } else {
+                out[pos++] = *p;
+            }
+        } else if (*p == '+') {
+            out[pos++] = ' ';
+        } else {
+            out[pos++] = *p;
+        }
+    }
+    out[pos] = '\0';
+    return pos;
+}
+
 size_t mnet_json_escape(
     char *out,
     size_t out_size,

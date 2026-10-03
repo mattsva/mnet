@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "mnet_router.h"
+#include "mnet_response.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -30,6 +31,7 @@ int mnet_route_match(const mnet_route_t *route,
                 }
                 memcpy(value, seg_start, seg_len);
                 value[seg_len] = '\0';
+                mnet_url_decode(value, seg_len + 1, value);
                 out_values[n] = value;
             }
             n++;

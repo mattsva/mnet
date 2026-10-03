@@ -11,6 +11,7 @@
 #include <mnet_response.h>
 #include <mnet_request.h>
 #include <mnet_router.h>
+#include <mnet_app.h>
 
 #include <assert.h>
 #include <stdio.h>
@@ -77,6 +78,31 @@ static void test_mnet_status(void)
     assert(strcmp(r.content_type, "text/plain; charset=utf-8") == 0);
     assert(strcmp((const char *)r.body, "created") == 0);
     printf("  PASS test_mnet_status\n");
+}
+
+static void test_mnet_url_decode(void)
+{
+    char out[256];
+
+    mnet_url_decode(out, sizeof(out), "hello");
+    assert(strcmp(out, "hello") == 0);
+
+    mnet_url_decode(out, sizeof(out), "hello%20world");
+    assert(strcmp(out, "hello world") == 0);
+
+    mnet_url_decode(out, sizeof(out), "a%2Fb");
+    assert(strcmp(out, "a/b") == 0);
+
+    mnet_url_decode(out, sizeof(out), "a+b");
+    assert(strcmp(out, "a b") == 0);
+
+    mnet_url_decode(out, sizeof(out), "%C3%A9");
+    assert(strcmp(out, "\xC3\xA9") == 0);
+
+    mnet_url_decode(out, sizeof(out), "");
+    assert(strcmp(out, "") == 0);
+
+    printf("  PASS test_mnet_url_decode\n");
 }
 
 static void test_mnet_json_escape(void)
@@ -289,6 +315,7 @@ int main(void)
     test_mnet_jsonf_escape();
     test_mnet_error();
     test_mnet_status();
+    test_mnet_url_decode();
     test_mnet_json_escape();
 
     test_mnet_request_param();

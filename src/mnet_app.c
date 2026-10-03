@@ -4,6 +4,7 @@
 #include "mnet_request.h"
 #include "mnet_response.h"
 #include "mnet_router.h"
+#include <ctype.h>
 
 #include <errno.h>
 #include <signal.h>
@@ -191,6 +192,8 @@ static int parse_query_string(const char *qs,
             *out_names = NULL; *out_values = NULL; *out_count = 0;
             return -1;
         }
+        mnet_url_decode(names[idx], strlen(names[idx]) + 1, names[idx]);
+        mnet_url_decode(values[idx], strlen(values[idx]) + 1, values[idx]);
         idx++;
         token = strtok_r(NULL, "&", &save);
     }

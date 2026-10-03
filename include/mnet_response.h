@@ -19,6 +19,8 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args);
 mnet_response_t mnet_error(int status, const char *message);
 mnet_response_t mnet_status(int status, const char *body);
 
+size_t mnet_url_decode(char *out, size_t out_size, const char *s);
+
 size_t mnet_json_escape(
     char *out,
     size_t out_size,

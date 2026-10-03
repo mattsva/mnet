@@ -65,12 +65,15 @@ endif()
 # Examples
 add_executable(example_http_server example/example_http_server.c)
 target_link_libraries(example_http_server PRIVATE mnet_static)
+target_include_directories(example_http_server PRIVATE example)
 
 add_executable(example_api_server example/example_api_server.c)
 target_link_libraries(example_api_server PRIVATE mnet_static)
+target_include_directories(example_api_server PRIVATE example)
 
 add_executable(example_combined example/example_combined.c)
 target_link_libraries(example_combined PRIVATE mnet_static)
+target_include_directories(example_combined PRIVATE example)
 
 # Tests
 enable_testing()

@@ -3,6 +3,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "example_common.h"
+
 MNET_HANDLER(home)
 {
     (void)req;
@@ -89,13 +91,9 @@ MNET_HANDLER(not_found)
 
 int main(void)
 {
-    mnet_app_t *app = mnet_create();
-    if (app == NULL) {
-        fprintf(stderr, "Failed to create app\n");
-        return 1;
-    }
+    mnet_app_t *app = example_create();
+    if (app == NULL) return 1;
 
-    mnet_set_debug(app, 1);
     mnet_set_not_found_handler(app, not_found);
 
     MNET_GET(app, "/", home);
@@ -103,10 +101,6 @@ int main(void)
     MNET_GET(app, "/contact", contact);
     MNET_GET(app, "/time", current_time);
 
-    printf("Starting HTTP server on http://localhost:8080\n");
-    printf("Press Ctrl+C to stop\n");
-
-    int rc = mnet_run(app, 8080);
-    mnet_destroy(app);
-    return rc;
+    return example_serve(app, 8080,
+        "Starting HTTP server on http://localhost:8080\n");
 }

@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "example_common.h"
+
 /* In-memory "database" */
 static const char *items[] = {
     "Item One",
@@ -106,13 +108,8 @@ MNET_HANDLER(health)
 
 int main(void)
 {
-    mnet_app_t *app = mnet_create();
-    if (app == NULL) {
-        fprintf(stderr, "Failed to create app\n");
-        return 1;
-    }
-
-    mnet_set_debug(app, 1);
+    mnet_app_t *app = example_create();
+    if (app == NULL) return 1;
 
     /* API routes */
     MNET_GET(app, "/api/items", list_items);
@@ -122,17 +119,13 @@ int main(void)
     MNET_POST(app, "/api/echo", api_echo);
     MNET_GET(app, "/api/health", health);
 
-    printf("Starting API server on http://localhost:8080\n");
-    printf("Endpoints:\n");
-    printf("  GET  /api/items        - list all items\n");
-    printf("  GET  /api/items/:id    - get item by ID\n");
-    printf("  POST /api/items        - create item\n");
-    printf("  GET  /api/search?q=    - search items\n");
-    printf("  POST /api/echo         - echo back request\n");
-    printf("  GET  /api/health       - health check\n");
-    printf("Press Ctrl+C to stop\n");
-
-    int rc = mnet_run(app, 8080);
-    mnet_destroy(app);
-    return rc;
+    return example_serve(app, 8080,
+        "Starting API server on http://localhost:8080\n"
+        "Endpoints:\n"
+        "  GET  /api/items        - list all items\n"
+        "  GET  /api/items/:id    - get item by ID\n"
+        "  POST /api/items        - create item\n"
+        "  GET  /api/search?q=    - search items\n"
+        "  POST /api/echo         - echo back request\n"
+        "  GET  /api/health       - health check\n");
 }

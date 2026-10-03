@@ -4,6 +4,8 @@
 #include <time.h>
 #include <stdlib.h>
 
+#include "example_common.h"
+
 static const char *users[] = {
     "Alice",
     "Bob",
@@ -210,13 +212,9 @@ MNET_HANDLER(custom_404)
 
 int main(void)
 {
-    mnet_app_t *app = mnet_create();
-    if (app == NULL) {
-        fprintf(stderr, "Failed to create app\n");
-        return 1;
-    }
+    mnet_app_t *app = example_create();
+    if (app == NULL) return 1;
 
-    mnet_set_debug(app, 1);
     mnet_set_not_found_handler(app, custom_404);
 
     /* Optional configuration */
@@ -238,22 +236,18 @@ int main(void)
     MNET_GET(app, "/api/health", api_health);
     MNET_POST(app, "/api/echo", api_echo);
 
-    printf("Starting combined server on http://localhost:8080\n");
-    printf("\nWeb pages:\n");
-    printf("  GET  /                    - Home page\n");
-    printf("  GET  /users               - Users list (HTML)\n");
-    printf("  GET  /users/:id           - User detail (HTML)\n");
-    printf("\nAPI endpoints:\n");
-    printf("  GET  /api/users           - List all users\n");
-    printf("  GET  /api/users/:id       - Get user by ID\n");
-    printf("  POST /api/users           - Create user (Bearer secret)\n");
-    printf("  GET  /api/search?q=       - Search users\n");
-    printf("  GET  /api/protected       - Requires Authorization header\n");
-    printf("  GET  /api/health          - Health check\n");
-    printf("  POST /api/echo            - Echo request details\n");
-    printf("\nPress Ctrl+C to stop\n");
-
-    int rc = mnet_run(app, 8080);
-    mnet_destroy(app);
-    return rc;
+    return example_serve(app, 8080,
+        "Starting combined server on http://localhost:8080\n"
+        "\nWeb pages:\n"
+        "  GET  /                    - Home page\n"
+        "  GET  /users               - Users list (HTML)\n"
+        "  GET  /users/:id           - User detail (HTML)\n"
+        "\nAPI endpoints:\n"
+        "  GET  /api/users           - List all users\n"
+        "  GET  /api/users/:id       - Get user by ID\n"
+        "  POST /api/users           - Create user (Bearer secret)\n"
+        "  GET  /api/search?q=       - Search users\n"
+        "  GET  /api/protected       - Requires Authorization header\n"
+        "  GET  /api/health          - Health check\n"
+        "  POST /api/echo            - Echo request details\n");
 }

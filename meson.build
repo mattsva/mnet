@@ -65,23 +65,25 @@ mnet_shared = shared_library('mnet',
     soversion: '1',
 )
 
+example_inc = include_directories('example')
+
 # Examples
 example_http_server = executable('example_http_server',
     'example/example_http_server.c',
     link_with: mnet_static,
-    include_directories: mnet_inc,
+    include_directories: [mnet_inc, example_inc],
 )
 
 example_api_server = executable('example_api_server',
     'example/example_api_server.c',
     link_with: mnet_static,
-    include_directories: mnet_inc,
+    include_directories: [mnet_inc, example_inc],
 )
 
 example_combined = executable('example_combined',
     'example/example_combined.c',
     link_with: mnet_static,
-    include_directories: mnet_inc,
+    include_directories: [mnet_inc, example_inc],
 )
 
 # Tests

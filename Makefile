@@ -26,13 +26,13 @@ examples: example/example_http_server \
           example/example_combined
 
 example/example_http_server: $(SRCS) example/example_http_server.c
-	$(CC) $(CFLAGS) $(SRCS) example/example_http_server.c -o $@
+	$(CC) $(CFLAGS) -Iexample $(SRCS) example/example_http_server.c -o $@ $(LDFLAGS)
 
 example/example_api_server: $(SRCS) example/example_api_server.c
-	$(CC) $(CFLAGS) $(SRCS) example/example_api_server.c -o $@
+	$(CC) $(CFLAGS) -Iexample $(SRCS) example/example_api_server.c -o $@ $(LDFLAGS)
 
 example/example_combined: $(SRCS) example/example_combined.c
-	$(CC) $(CFLAGS) $(SRCS) example/example_combined.c -o $@
+	$(CC) $(CFLAGS) -Iexample $(SRCS) example/example_combined.c -o $@ $(LDFLAGS)
 
 # Compile a .c file with mnet (e.g. make main builds from main.c)
 %:: %.c $(SRCS)

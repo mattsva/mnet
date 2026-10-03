@@ -29,6 +29,7 @@ typedef struct mnet_route {
     mnet_handler_legacy_t legacy_handler; /* old-style, or NULL */
     /* Extracted parameter names for this route, NULL-terminated */
     const char **param_names;
+    void *user_data;
 } mnet_route_t;
 
 int mnet_route_match(

@@ -65,6 +65,23 @@ mnet_response_t my_middleware(mnet_request_t *req,
 mnet_use(app, my_middleware);
 ```
 
+### Static file serving
+
+```c
+mnet_static(app, "/static", "/var/www/files");
+```
+
+Serves files from `/var/www/files` under the `/static` URL prefix. Path traversal is prevented via `realpath` checks. Common MIME types are detected from file extensions.
+
+### Wildcard routes
+
+Routes ending with `*` match any remaining path. The matched portion is available as a path parameter:
+
+```c
+MNET_GET(app, "/static/*", serve_static);
+// For /static/css/style.css, MNET_PARAM(req, "*") returns "css/style.css"
+```
+
 ### Request parameters
 
 **Path parameters** (`:id`, `:post_id`, etc.):

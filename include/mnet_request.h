@@ -36,6 +36,7 @@ typedef struct mnet_request {
     const char **header_values;
 
     request_extras_t *extras;
+    void *user_data;
 } mnet_request_t;
 
 const char *mnet_request_method(const mnet_request_t *request);

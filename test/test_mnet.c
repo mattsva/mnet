@@ -263,6 +263,22 @@ static void test_mnet_route_match_partial_free(void)
     printf("  PASS test_mnet_route_match_partial_free\n");
 }
 
+static void test_mnet_route_match_wildcard(void)
+{
+    mnet_route_t route = {
+        .method = MNET_HTTP_GET,
+        .path = "/static/*",
+        .param_names = NULL,
+    };
+
+    const char *values[4] = {0};
+    int n = mnet_route_match(&route, "/static/css/style.css", values, 4);
+    assert(n == 1);
+    assert(strcmp(values[0], "css/style.css") == 0);
+    mnet_match_params_free(values, n);
+    printf("  PASS test_mnet_route_match_wildcard\n");
+}
+
 MNET_HANDLER(test_handler)
 {
     (void)req;
@@ -349,6 +365,7 @@ int main(void)
     test_mnet_route_match_no_match();
     test_mnet_route_match_static();
     test_mnet_route_match_partial_free();
+    test_mnet_route_match_wildcard();
 
     test_handler_macro();
     test_route_macros_compile();

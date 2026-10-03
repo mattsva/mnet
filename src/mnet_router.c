@@ -17,7 +17,24 @@ int mnet_route_match(const mnet_route_t *route,
     size_t ppos = 0, rpos = 0, n = 0;
 
     while (pattern[ppos] && request_path[rpos]) {
-        if (pattern[ppos] == ':') {
+        if (pattern[ppos] == '*') {
+            /* Wildcard: match everything remaining */
+            if (n < max_values) {
+                size_t seg_len = strlen(request_path + rpos);
+                char *value = malloc(seg_len + 1);
+                if (value == NULL) {
+                    mnet_match_params_free(out_values, (int)n);
+                    return -1;
+                }
+                memcpy(value, request_path + rpos, seg_len);
+                value[seg_len] = '\0';
+                mnet_url_decode(value, seg_len + 1, value);
+                out_values[n] = value;
+            }
+            n++;
+            ppos++;
+            rpos = strlen(request_path);
+        } else if (pattern[ppos] == ':') {
             const char *seg_start = request_path + rpos;
             while (request_path[rpos] && request_path[rpos] != '/')
                 rpos++;

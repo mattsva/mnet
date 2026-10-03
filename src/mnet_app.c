@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 static int app_debug = 0;
 
@@ -59,6 +62,7 @@ static int mnet_add_route(
     r->path = path;
     r->handler = handler;
     r->param_names = NULL;
+    r->user_data = NULL;
 
     /* Parse parameter names from the pattern */
     size_t param_count = 0;
@@ -605,6 +609,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
             .header_values = (const char **)extras.header_values,
             .header_count = (int)extras.header_count,
             .extras = &extras,
+            .user_data = route->user_data,
         };
 
         /* Call handler, optionally through middleware */
@@ -669,6 +674,123 @@ void mnet_set_not_found_handler(mnet_app_t *app, mnet_response_t (*handler)(mnet
 void mnet_use(mnet_app_t *app, mnet_middleware_t middleware)
 {
     if (app != NULL) app->middleware = middleware;
+}
+
+typedef struct {
+    char *url_prefix;
+    char *fs_path;
+} static_config_t;
+
+static const char *mime_type(const char *path)
+{
+    const char *dot = strrchr(path, '.');
+    if (dot == NULL) return "application/octet-stream";
+    dot++;
+    if (strcasecmp(dot, "html") == 0 || strcasecmp(dot, "htm") == 0) return "text/html";
+    if (strcasecmp(dot, "css") == 0) return "text/css";
+    if (strcasecmp(dot, "js") == 0) return "application/javascript";
+    if (strcasecmp(dot, "json") == 0) return "application/json";
+    if (strcasecmp(dot, "png") == 0) return "image/png";
+    if (strcasecmp(dot, "jpg") == 0 || strcasecmp(dot, "jpeg") == 0) return "image/jpeg";
+    if (strcasecmp(dot, "gif") == 0) return "image/gif";
+    if (strcasecmp(dot, "svg") == 0) return "image/svg+xml";
+    if (strcasecmp(dot, "ico") == 0) return "image/x-icon";
+    if (strcasecmp(dot, "txt") == 0) return "text/plain";
+    if (strcasecmp(dot, "xml") == 0) return "application/xml";
+    if (strcasecmp(dot, "pdf") == 0) return "application/pdf";
+    return "application/octet-stream";
+}
+
+static mnet_response_t static_handler(mnet_request_t *req)
+{
+    static_config_t *cfg = (static_config_t *)req->user_data;
+    if (cfg == NULL) return mnet_error(500, "internal server error");
+
+    const char *url_path = req->path;
+    const char *rel = url_path + strlen(cfg->url_prefix);
+    if (*rel == '/') rel++;
+
+    char fs_path[4096];
+    snprintf(fs_path, sizeof(fs_path), "%s/%s", cfg->fs_path, rel);
+
+    char *real = realpath(fs_path, NULL);
+    if (real == NULL) {
+        return mnet_error(404, "not found");
+    }
+    char *base_real = realpath(cfg->fs_path, NULL);
+    if (base_real == NULL || strncmp(real, base_real, strlen(base_real)) != 0) {
+        free(real);
+        free(base_real);
+        return mnet_error(403, "forbidden");
+    }
+    free(base_real);
+
+    int fd = open(real, O_RDONLY);
+    if (fd == -1) {
+        free(real);
+        return mnet_error(404, "not found");
+    }
+
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        close(fd);
+        free(real);
+        return mnet_error(404, "not found");
+    }
+
+    char *data = malloc((size_t)st.st_size);
+    if (data == NULL) {
+        close(fd);
+        free(real);
+        return mnet_error(500, "internal server error");
+    }
+
+    ssize_t total = 0;
+    while (total < (ssize_t)st.st_size) {
+        ssize_t n = read(fd, data + total, (size_t)st.st_size - (size_t)total);
+        if (n <= 0) break;
+        total += n;
+    }
+    close(fd);
+    free(real);
+
+    mnet_response_t r = {
+        .status = 200,
+        .content_type = mime_type(fs_path),
+        .body = data,
+        .body_length = (size_t)total,
+    };
+    return r;
+}
+
+void mnet_static(mnet_app_t *app, const char *url_prefix,
+    const char *fs_path)
+{
+    if (app == NULL || url_prefix == NULL || fs_path == NULL) return;
+
+    static_config_t *cfg = malloc(sizeof(static_config_t));
+    if (cfg == NULL) return;
+    cfg->url_prefix = strdup(url_prefix);
+    cfg->fs_path = strdup(fs_path);
+    if (cfg->url_prefix == NULL || cfg->fs_path == NULL) {
+        free(cfg->url_prefix);
+        free(cfg->fs_path);
+        free(cfg);
+        return;
+    }
+
+    char pattern[2048];
+    snprintf(pattern, sizeof(pattern), "%s/*", url_prefix);
+
+    mnet_route_t *r = &app->routes[app->route_count];
+    r->method = MNET_HTTP_GET;
+    r->path = strdup(pattern);
+    r->handler = static_handler;
+    r->param_names = NULL;
+    r->legacy_handler = NULL;
+    r->user_data = cfg;
+
+    app->route_count++;
 }
 
 int mnet_run(mnet_app_t *app, uint16_t port)

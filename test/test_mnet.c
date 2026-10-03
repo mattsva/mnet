@@ -15,6 +15,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void test_mnet_text(void)
@@ -24,6 +25,7 @@ static void test_mnet_text(void)
     assert(strcmp(r.content_type, "text/plain; charset=utf-8") == 0);
     assert(strcmp((const char *)r.body, "hello") == 0);
     assert(r.body_length == 5);
+    mnet_response_free(&r);
     printf("  PASS test_mnet_text\n");
 }
 
@@ -33,6 +35,7 @@ static void test_mnet_html(void)
     assert(r.status == 200);
     assert(strcmp(r.content_type, "text/html; charset=utf-8") == 0);
     assert(strcmp((const char *)r.body, "<h1>hi</h1>") == 0);
+    mnet_response_free(&r);
     printf("  PASS test_mnet_html\n");
 }
 
@@ -42,6 +45,7 @@ static void test_mnet_json(void)
     assert(r.status == 200);
     assert(strcmp(r.content_type, "application/json") == 0);
     assert(strcmp((const char *)r.body, "{\"ok\":true}") == 0);
+    mnet_response_free(&r);
     printf("  PASS test_mnet_json\n");
 }
 
@@ -51,6 +55,7 @@ static void test_mnet_jsonf(void)
     assert(r.status == 200);
     assert(strcmp(r.content_type, "application/json") == 0);
     assert(strcmp((const char *)r.body, "{\"id\":\"42\"}") == 0);
+    mnet_response_free(&r);
     printf("  PASS test_mnet_jsonf\n");
 }
 
@@ -59,6 +64,7 @@ static void test_mnet_jsonf_escape(void)
     mnet_response_t r = mnet_jsonf("{\"name\":\"%s\"}", "he\"llo");
     assert(r.status == 200);
     assert(strstr((const char *)r.body, "\\\"") != NULL);
+    mnet_response_free(&r);
     printf("  PASS test_mnet_jsonf_escape\n");
 }
 
@@ -71,6 +77,7 @@ static void test_mnet_jsonf_long_string(void)
     mnet_response_t r = mnet_jsonf("{\"data\":\"%s\"}", long_str);
     assert(r.status == 200);
     assert(r.body_length > 5000);
+    mnet_response_free(&r);
     printf("  PASS test_mnet_jsonf_long_string\n");
 }
 
@@ -80,6 +87,7 @@ static void test_mnet_error(void)
     assert(r.status == 400);
     assert(strcmp(r.content_type, "text/plain; charset=utf-8") == 0);
     assert(strcmp((const char *)r.body, "bad request") == 0);
+    mnet_response_free(&r);
     printf("  PASS test_mnet_error\n");
 }
 
@@ -89,6 +97,7 @@ static void test_mnet_status(void)
     assert(r.status == 201);
     assert(strcmp(r.content_type, "text/plain; charset=utf-8") == 0);
     assert(strcmp((const char *)r.body, "created") == 0);
+    mnet_response_free(&r);
     printf("  PASS test_mnet_status\n");
 }
 
@@ -316,6 +325,7 @@ static void test_handler_macro(void)
     mnet_response_t r = test_handler(&req);
     assert(r.status == 200);
     assert(strcmp((const char *)r.body, "ok") == 0);
+    mnet_response_free(&r);
     printf("  PASS test_handler_macro\n");
 }
 
@@ -406,6 +416,8 @@ static void test_mnet_chunked(void)
     assert(r.status == 200);
     assert(r.chunked == 1);
     assert(r.body_length == strlen(body));
+    /* chunked responses don't own the body, so free is a no-op */
+    mnet_response_free(&r);
     printf("  PASS test_mnet_chunked\n");
 }
 
@@ -443,6 +455,66 @@ static void test_max_body_size(void)
 
     mnet_destroy(app);
     printf("  PASS test_max_body_size\n");
+}
+
+static void test_mnet_response_free_null(void)
+{
+    mnet_response_free(NULL);
+    printf("  PASS test_mnet_response_free_null\n");
+}
+
+static void test_mnet_response_free_zeroed(void)
+{
+    mnet_response_t r = {0};
+    mnet_response_free(&r);
+    assert(r.body == NULL);
+    assert(r.body_length == 0);
+    printf("  PASS test_mnet_response_free_zeroed\n");
+}
+
+static void test_mnet_response_free_owned(void)
+{
+    mnet_response_t r = mnet_text("free me");
+    assert(r.body != NULL);
+    mnet_response_free(&r);
+    assert(r.body == NULL);
+    assert(r.body_length == 0);
+    printf("  PASS test_mnet_response_free_owned\n");
+}
+
+static void test_mnet_response_free_chunked(void)
+{
+    const char *body = "no free";
+    mnet_response_t r = mnet_chunked(200, "text/plain", body, strlen(body));
+    mnet_response_free(&r);
+    /* chunked responses don't own the body, so it's not freed or nulled */
+    assert(r.body_length == 0);
+    printf("  PASS test_mnet_response_free_chunked\n");
+}
+
+static void test_mnet_jsonf_very_long_string(void)
+{
+    size_t len = 10000;
+    char *long_str = malloc(len + 1);
+    assert(long_str != NULL);
+    memset(long_str, 'x', len);
+    long_str[len] = '\0';
+
+    mnet_response_t r = mnet_jsonf("{\"data\":\"%s\"}", long_str);
+    assert(r.status == 200);
+    assert(r.body_length > len);
+    mnet_response_free(&r);
+    free(long_str);
+    printf("  PASS test_mnet_jsonf_very_long_string\n");
+}
+
+static void test_mnet_jsonf_unicode_escape(void)
+{
+    mnet_response_t r = mnet_jsonf("{\"name\":\"%s\"}", "caf\xC3\xA9");
+    assert(r.status == 200);
+    assert(r.body_length > 0);
+    mnet_response_free(&r);
+    printf("  PASS test_mnet_jsonf_unicode_escape\n");
 }
 
 int main(void)
@@ -485,6 +557,13 @@ int main(void)
     test_max_connections();
     test_keep_alive_timeout();
     test_max_body_size();
+
+    test_mnet_response_free_null();
+    test_mnet_response_free_zeroed();
+    test_mnet_response_free_owned();
+    test_mnet_response_free_chunked();
+    test_mnet_jsonf_very_long_string();
+    test_mnet_jsonf_unicode_escape();
 
     printf("\nAll tests passed!\n");
     return 0;

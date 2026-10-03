@@ -17,12 +17,20 @@ The core philosophy: **web development in C should feel almost as clean as in hi
 - `mnet_create()` / `mnet_run()` / `mnet_destroy()` - application lifecycle
 - `mnet_stop()` - graceful shutdown
 - `MNET_HANDLER(name)` - declare handlers with clean syntax
-- `MNET_GET`, `MNET_POST`, `MNET_PUT`, `MNET_PATCH`, `MNET_DELETE` - route registration macros
+- `MNET_GET`, `MNET_POST`, `MNET_PUT`, `MNET_PATCH`, `MNET_DELETE`, `MNET_HEAD`, `MNET_OPTIONS` - route registration macros
 - Path parameters (`/api/users/:id`), query strings, headers, body access
+- URL decoding for path params and query values
+- Cookie parsing (`MNET_COOKIE(req, "session")`)
+- Wildcard routes (`/static/*`)
+- Static file serving (`mnet_static(app, "/static", "/var/www/files")`)
+- Middleware support (`mnet_use(app, middleware_fn)`)
+- Keep-alive connections and chunked transfer encoding
 
 ### Response helpers
 - `mnet_text()`, `mnet_html()`, `mnet_json()`, `mnet_jsonf()` - response builders
 - `mnet_error()`, `mnet_status()` - error and custom-status responses
+- `mnet_chunked()` - chunked transfer encoding
+- `mnet_response_free()` - free response body memory
 - `mnet_json_escape()` - safe JSON string escaping
 
 ### Request accessors
@@ -30,6 +38,20 @@ The core philosophy: **web development in C should feel almost as clean as in hi
 - `MNET_QUERY(req, "search")` - query parameters  
 - `MNET_HEADER(req, "Authorization")` - headers (case-insensitive)
 - `MNET_BODY(req)`, `MNET_BODY_LEN(req)` - request body
+- `MNET_COOKIE(req, "session")` - cookies
+
+### Optional configuration
+- `mnet_set_max_connections(app, 100)` - limit concurrent connections (0 = unlimited)
+- `mnet_set_keep_alive_timeout(app, 30)` - keep-alive idle timeout (0 = no timeout)
+- `mnet_set_max_body_size(app, 1024*1024)` - max request body size (0 = 16 MB default)
+- `mnet_set_timeout(app, 30)` - socket timeout in seconds (0 = no timeout)
+- `mnet_set_debug(app, 1)` - enable debug logging
+
+### Build systems
+- Make (original)
+- CMake
+- Meson
+- Shared library support (`libmnet.so`)
 
 ## Design decisions
 
@@ -38,3 +60,4 @@ The core philosophy: **web development in C should feel almost as clean as in hi
 - **C17** - modern C, compiles with `-Wall -Wextra -Wpedantic -Werror`
 - **Macros for ergonomics** - `MNET_HANDLER` and route macros reduce boilerplate
 - **No legacy baggage** - clean, modern API only
+- **Memory-safe** - all response bodies are freed with `mnet_response_free()`

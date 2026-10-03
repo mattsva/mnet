@@ -63,6 +63,14 @@ test_mnet = executable('test_mnet',
 
 test('mnet_tests', test_mnet)
 
+test_http = executable('test_http',
+    'test/test_http.c',
+    link_with: mnet_static,
+    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+)
+
+test('mnet_http_tests', test_http)
+
 # Install headers (libraries are installed by default)
 install_headers('include/mnet.h', 'include/mnet_app.h', 'include/mnet_request.h',
     'include/mnet_response.h', 'include/mnet_router.h', 'include/mnet_socket.h',

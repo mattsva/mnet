@@ -517,6 +517,136 @@ static void test_mnet_jsonf_unicode_escape(void)
     printf("  PASS test_mnet_jsonf_unicode_escape\n");
 }
 
+static void test_mnet_url_decode_ex(void)
+{
+    char out[64];
+
+    /* normal */
+    assert(mnet_url_decode_ex("hello", 5, out, sizeof(out)) == 5);
+    assert(strcmp(out, "hello") == 0);
+
+    /* %20 and + */
+    assert(mnet_url_decode_ex("a%20b", 5, out, sizeof(out)) == 3);
+    assert(strcmp(out, "a b") == 0);
+    assert(mnet_url_decode_ex("a+b", 3, out, sizeof(out)) == 3);
+    assert(strcmp(out, "a b") == 0);
+
+    /* %2F decodes to a literal slash */
+    assert(mnet_url_decode_ex("a%2Fb", 5, out, sizeof(out)) == 3);
+    assert(strcmp(out, "a/b") == 0);
+
+    /* malformed percent escapes are rejected, not passed through */
+    assert(mnet_url_decode_ex("a%zzb", 5, out, sizeof(out)) == -1);
+    assert(mnet_url_decode_ex("a%2", 3, out, sizeof(out)) == -1);   /* truncated */
+    assert(mnet_url_decode_ex("a%", 2, out, sizeof(out)) == -1);
+
+    /* %00 must not silently truncate */
+    assert(mnet_url_decode_ex("a%00b", 5, out, sizeof(out)) == -1);
+
+    /* explicit length is honoured (source need not be NUL-terminated) */
+    assert(mnet_url_decode_ex("helloXX", 5, out, sizeof(out)) == 5);
+    assert(strcmp(out, "hello") == 0);
+
+    /* output exactly filling the buffer (needs room for the NUL too) */
+    assert(mnet_url_decode_ex("abc", 3, out, 4) == 3);
+    assert(strcmp(out, "abc") == 0);
+
+    /* one byte short: must refuse rather than truncate */
+    assert(mnet_url_decode_ex("abc", 3, out, 3) == -1);
+
+    /* zero-size destination is an error, not a write */
+    assert(mnet_url_decode_ex("abc", 3, out, 0) == -1);
+
+    /* NULL handling */
+    assert(mnet_url_decode_ex(NULL, 0, out, sizeof(out)) == -1);
+    assert(mnet_url_decode_ex("a", 1, NULL, 4) == -1);
+
+    printf("  PASS test_mnet_url_decode_ex\n");
+}
+
+static void test_mnet_url_decode_malformed(void)
+{
+    char out[64];
+
+    /* The legacy wrapper must not leave a truncated value behind. */
+    memset(out, 'X', sizeof(out));
+    size_t n = mnet_url_decode(out, sizeof(out), "a%zzb");
+    assert(n == 0);
+    assert(out[0] == '\0');
+
+    memset(out, 'X', sizeof(out));
+    n = mnet_url_decode(out, sizeof(out), "a%00b");
+    assert(n == 0);
+    assert(out[0] == '\0');
+
+    /* exact fit succeeds */
+    char small[4];
+    n = mnet_url_decode(small, sizeof(small), "abc");
+    assert(n == 3);
+    assert(strcmp(small, "abc") == 0);
+
+    /* overflow refuses */
+    char tiny[3];
+    n = mnet_url_decode(tiny, sizeof(tiny), "abcd");
+    assert(n == 0);
+    assert(tiny[0] == '\0');
+
+    printf("  PASS test_mnet_url_decode_malformed\n");
+}
+
+static void test_mnet_header_value_valid(void)
+{
+    assert(mnet_header_value_valid("text/plain") == 1);
+    assert(mnet_header_value_valid("application/json; charset=utf-8") == 1);
+    assert(mnet_header_value_valid("") == 1);
+    assert(mnet_header_value_valid(NULL) == 1);
+
+    /* CR / LF / CRLF must be rejected (header injection) */
+    assert(mnet_header_value_valid("text/plain\r") == 0);
+    assert(mnet_header_value_valid("text/plain\n") == 0);
+    assert(mnet_header_value_valid("text/plain\r\nX-Evil: 1") == 0);
+    assert(mnet_header_value_valid("a\nb") == 0);
+
+    /* other control characters too */
+    assert(mnet_header_value_valid("a\x01b") == 0);
+    assert(mnet_header_value_valid("a\x7f" "b") == 0);
+
+    printf("  PASS test_mnet_header_value_valid\n");
+}
+
+static void test_mnet_header_name_valid(void)
+{
+    assert(mnet_header_name_valid("Content-Type") == 1);
+    assert(mnet_header_name_valid("X-Custom_Header") == 1);
+    assert(mnet_header_name_valid("") == 0);
+    assert(mnet_header_name_valid(NULL) == 0);
+    assert(mnet_header_name_valid("Bad Name") == 0);   /* space */
+    assert(mnet_header_name_valid("Bad:Name") == 0);   /* colon */
+    assert(mnet_header_name_valid("Bad\r\nName") == 0);
+    assert(mnet_header_name_valid("Bad\nName") == 0);
+
+    printf("  PASS test_mnet_header_name_valid\n");
+}
+
+static void test_route_match_allocation_failure_shape(void)
+{
+    /* A route with more parameters than the caller's slot array must not
+       produce more live values than the caller can free. */
+    mnet_route_t route = {
+        .method = MNET_HTTP_GET,
+        .path = "/a/:x/b/:y",
+        .param_names = (const char *[]){"x", "y", NULL},
+    };
+
+    const char *values[4] = {0};
+    int n = mnet_route_match(&route, "/a/1/b/2", values, 1);
+    assert(n == 2);              /* both segments matched */
+    assert(values[0] != NULL);   /* only one value stored (max_values=1) */
+    assert(values[1] == NULL);
+    mnet_match_params_free(values, 1);
+    printf("  PASS test_route_match_allocation_failure_shape\n");
+}
+
 int main(void)
 {
     printf("Running mnet tests...\n");
@@ -564,6 +694,12 @@ int main(void)
     test_mnet_response_free_chunked();
     test_mnet_jsonf_very_long_string();
     test_mnet_jsonf_unicode_escape();
+
+    test_mnet_url_decode_ex();
+    test_mnet_url_decode_malformed();
+    test_mnet_header_value_valid();
+    test_mnet_header_name_valid();
+    test_route_match_allocation_failure_shape();
 
     printf("\nAll tests passed!\n");
     return 0;

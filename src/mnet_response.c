@@ -7,34 +7,97 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int hex_value(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+int mnet_url_decode_ex(const char *src, size_t src_len, char *dst,
+    size_t dst_size)
+{
+    size_t i;
+    size_t pos = 0;
+
+    if (src == NULL || dst == NULL || dst_size == 0) return -1;
+
+    for (i = 0; i < src_len; i++) {
+        unsigned char c = (unsigned char)src[i];
+        unsigned char out;
+
+        if (c == '%') {
+            int hi, lo;
+
+            if (i + 2 >= src_len) return -1; /* truncated escape */
+            hi = hex_value(src[i + 1]);
+            lo = hex_value(src[i + 2]);
+            if (hi < 0 || lo < 0) return -1; /* malformed escape */
+            out = (unsigned char)((hi << 4) | lo);
+            i += 2;
+        } else if (c == '+') {
+            out = ' ';
+        } else {
+            out = c;
+        }
+
+        /* A NUL escape would silently truncate the decoded value. */
+        if (out == '\0') return -1;
+
+        /* Refuse rather than truncate. */
+        if (pos + 1 >= dst_size) return -1;
+
+        dst[pos++] = (char)out;
+    }
+
+    dst[pos] = '\0';
+    return (int)pos;
+}
+
 size_t mnet_url_decode(char *out, size_t out_size, const char *s)
 {
-    if (s == NULL) return 0;
-    size_t pos = 0;
-    for (const char *p = s; *p && pos < out_size - 1; p++) {
-        if (*p == '%' && p[1] && p[2]) {
-            int hi = -1, lo = -1;
-            char c1 = p[1], c2 = p[2];
-            if (c1 >= '0' && c1 <= '9') hi = c1 - '0';
-            else if (c1 >= 'a' && c1 <= 'f') hi = c1 - 'a' + 10;
-            else if (c1 >= 'A' && c1 <= 'F') hi = c1 - 'A' + 10;
-            if (c2 >= '0' && c2 <= '9') lo = c2 - '0';
-            else if (c2 >= 'a' && c2 <= 'f') lo = c2 - 'a' + 10;
-            else if (c2 >= 'A' && c2 <= 'F') lo = c2 - 'A' + 10;
-            if (hi >= 0 && lo >= 0) {
-                out[pos++] = (char)((hi << 4) | lo);
-                p += 2;
-            } else {
-                out[pos++] = *p;
-            }
-        } else if (*p == '+') {
-            out[pos++] = ' ';
-        } else {
-            out[pos++] = *p;
-        }
+    int n;
+
+    if (out == NULL || out_size == 0 || s == NULL) return 0;
+
+    n = mnet_url_decode_ex(s, strlen(s), out, out_size);
+    if (n < 0) {
+        /* Malformed or NUL escape, or the result would not fit: yield an
+           empty string rather than a partially decoded one, so callers never
+           act on a truncated value. */
+        out[0] = '\0';
+        return 0;
     }
-    out[pos] = '\0';
-    return pos;
+    return (size_t)n;
+}
+
+int mnet_header_value_valid(const char *value)
+{
+    if (value == NULL) return 1;
+
+    for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
+        /* Reject CR, LF and other control characters that could split a
+           response or smuggle a header. */
+        if (*p == '\r' || *p == '\n' || *p < 0x20 || *p == 0x7f) return 0;
+    }
+    return 1;
+}
+
+int mnet_header_name_valid(const char *name)
+{
+    if (name == NULL || *name == '\0') return 0;
+
+    for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+        unsigned char c = *p;
+
+        /* RFC 7230 token characters only. */
+        int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                 (c >= '0' && c <= '9') ||
+                 strchr("!#$%&'*+-.^_`|~", c) != NULL;
+        if (!ok) return 0;
+    }
+    return 1;
 }
 
 size_t mnet_json_escape(
@@ -323,31 +386,35 @@ mnet_response_t mnet_jsonf(const char *format, ...)
 
 mnet_response_t mnet_error(int status, const char *message)
 {
+    mnet_response_t r = {0};
+
     if (message == NULL) message = "";
+    r.status = status;
+    r.content_type = "text/plain; charset=utf-8";
+
     size_t len = strlen(message);
-    char *copy = strdup(message);
-    if (copy == NULL) copy = strdup("");
-    mnet_response_t r = {
-        .status = status,
-        .content_type = "text/plain; charset=utf-8",
-        .body = copy,
-        .body_length = len
-    };
+    char *copy = malloc(len + 1);
+    if (copy == NULL) return r; /* status 0 -> 500 by the server */
+    memcpy(copy, message, len + 1);
+    r.body = copy;
+    r.body_length = len;
     return r;
 }
 
 mnet_response_t mnet_status(int status, const char *body)
 {
+    mnet_response_t r = {0};
+
     if (body == NULL) body = "";
+    r.status = status;
+    r.content_type = "text/plain; charset=utf-8";
+
     size_t len = strlen(body);
-    char *copy = strdup(body);
-    if (copy == NULL) copy = strdup("");
-    mnet_response_t r = {
-        .status = status,
-        .content_type = "text/plain; charset=utf-8",
-        .body = copy,
-        .body_length = len
-    };
+    char *copy = malloc(len + 1);
+    if (copy == NULL) return r;
+    memcpy(copy, body, len + 1);
+    r.body = copy;
+    r.body_length = len;
     return r;
 }
 

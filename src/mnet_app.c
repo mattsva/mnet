@@ -20,10 +20,19 @@
 
 #define MNET_INITIAL_ROUTE_CAPACITY 8
 #define MNET_REQUEST_BUFFER_SIZE 8192
+#define MNET_MAX_HEADER_BYTES MNET_REQUEST_BUFFER_SIZE
+#define MNET_MAX_HEADERS 100
 #define MNET_MAX_BODY_SIZE (16 * 1024 * 1024)
 #define MNET_MAX_PARAMS 16
-#define MNET_MAX_HEADERS 32
 #define MNET_MAX_QUERY 16
+#define MNET_DEFAULT_TIMEOUT 30
+
+/* Parse/validation outcomes, surfaced to the client as an HTTP status. */
+#define MNET_PARSE_OK 0
+#define MNET_PARSE_BAD_REQUEST 1
+#define MNET_PARSE_TOO_LARGE 2
+#define MNET_PARSE_HEADERS_TOO_LARGE 3
+#define MNET_PARSE_UNSUPPORTED_METHOD 4
 
 typedef struct {
     char *url_prefix;
@@ -86,16 +95,17 @@ static int mnet_add_route(
             size_t len = (size_t)(p - start);
             if (len == 0) continue;
             char *name = malloc(len + 1);
-            if (name == NULL) return -1;
+            if (name == NULL) goto fail;
             memcpy(name, start, len);
             name[len] = '\0';
 
             const char **tmp = realloc(r->param_names,
-                (param_count + 1) * sizeof(const char *));
-            if (tmp == NULL) { free(name); return -1; }
+                (param_count + 2) * sizeof(const char *));
+            if (tmp == NULL) { free(name); goto fail; }
             r->param_names = tmp;
             r->param_names[param_count] = name;
             param_count++;
+            r->param_names[param_count] = NULL;
         } else {
             p++;
         }
@@ -103,6 +113,18 @@ static int mnet_add_route(
 
     app->route_count++;
     return 0;
+
+fail:
+    /* Release whatever was allocated for this route; it is not registered. */
+    if (r->param_names != NULL) {
+        for (size_t i = 0; i < param_count; i++) {
+            free((void *)r->param_names[i]);
+        }
+        free(r->param_names);
+        r->param_names = NULL;
+    }
+    errno = ENOMEM;
+    return -1;
 }
 
 static void free_route(mnet_route_t *r)
@@ -128,21 +150,37 @@ static void free_route(mnet_route_t *r)
     }
 }
 
+/*
+ * Find the route matching method + path.
+ *
+ * mnet_route_match() allocates a parameter value for each matched segment and
+ * frees those it has allocated itself when the match later fails. It does not
+ * know about values allocated by *previous* attempts, so any values left over
+ * from a failed attempt must be released here before the next attempt. On
+ * success *out_count reports how many values are live in out_params.
+ */
 static mnet_route_t *mnet_find_route(
     mnet_app_t *app,
     mnet_http_method_t method,
     const char *path,
     const char **out_params,
-    size_t max_params)
+    size_t max_params,
+    size_t *out_count)
 {
+    *out_count = 0;
+
     for (size_t i = 0; i < app->route_count; i++) {
         mnet_route_t *r = &app->routes[i];
         if (r->method != method) continue;
 
         int n = mnet_route_match(r, path, out_params, max_params);
         if (n > 0) {
+            *out_count = (size_t)n;
             return r;
         } else if (n == 0) {
+            /* The attempt may have allocated values before failing. */
+            mnet_match_params_free(out_params, (int)max_params);
+
             /* Try exact match next */
             if (strcmp(r->path, path) == 0) {
                 return r;
@@ -150,6 +188,7 @@ static mnet_route_t *mnet_find_route(
             continue;
         } else {
             /* n < 0: allocation error */
+            mnet_match_params_free(out_params, (int)max_params);
             return NULL;
         }
     }
@@ -184,6 +223,10 @@ static int parse_query_string(const char *qs,
     for (const char *p = qs; *p; p++) {
         if (*p == '&') count++;
     }
+
+    /* Cap the pair count so a request with a huge query string cannot force a
+       correspondingly huge allocation. */
+    if (count > MNET_MAX_QUERY) count = MNET_MAX_QUERY;
 
     char **names = malloc(count * sizeof(char *));
     char **values = malloc(count * sizeof(char *));
@@ -235,39 +278,36 @@ static int parse_query_string(const char *qs,
     return 0;
 }
 
-/* Parse headers from the header section */
+/* Parse headers from the header section.
+   Returns 0 on success, -1 on failure (too many headers or allocation). */
 static int parse_headers(const char *headers_raw,
     char ***out_names, char ***out_values, size_t *out_count)
 {
+    char **names = NULL;
+    char **values = NULL;
+    char *copy = NULL;
+    size_t count = 0;
+
+    *out_names = NULL;
+    *out_values = NULL;
+    *out_count = 0;
+
     if (headers_raw == NULL || *headers_raw == '\0') {
-        *out_names = NULL;
-        *out_values = NULL;
-        *out_count = 0;
         return 0;
     }
 
-    char **names = NULL;
-    char **values = NULL;
-    size_t count = 0;
-    size_t cap = MNET_MAX_HEADERS;
-
-    names = malloc(cap * sizeof(char *));
-    values = malloc(cap * sizeof(char *));
+    names = malloc(MNET_MAX_HEADERS * sizeof(char *));
+    values = malloc(MNET_MAX_HEADERS * sizeof(char *));
     if (names == NULL || values == NULL) goto fail;
 
-    char *copy = strdup(headers_raw);
+    copy = strdup(headers_raw);
     if (copy == NULL) goto fail;
 
     char *save = NULL;
     char *line = strtok_r(copy, "\r\n", &save);
     while (line != NULL) {
-        if (count >= cap) {
-            cap *= 2;
-            char **tmpn = realloc(names, cap * sizeof(char *));
-            char **tmpv = realloc(values, cap * sizeof(char *));
-            if (tmpn == NULL || tmpv == NULL) { free(tmpn); free(tmpv); goto fail; }
-            names = tmpn; values = tmpv;
-        }
+        /* Hard cap on header count: refuse to grow beyond it. */
+        if (count >= MNET_MAX_HEADERS) goto fail;
 
         char *colon = strchr(line, ':');
         if (colon) {
@@ -295,19 +335,17 @@ fail:
     for (size_t i = 0; i < count; i++) {
         free(names[i]); free(values[i]);
     }
-    free(names); free(values);
+    free(names); free(values); free(copy);
     *out_names = NULL; *out_values = NULL; *out_count = 0;
     return -1;
 }
 
-/* Extract request line and body from raw buffer.
-   Returns 0 on success. */
+/* Extract the request line (method and target) from the raw buffer.
+   Returns 0 on success, -1 if the request line is malformed. */
 static int parse_raw_request(
     const char *buffer,
     char *method_out,
-    char *path_out,
-    char **body_out,
-    size_t *body_len_out)
+    char *path_out)
 {
     /* Find header/body separator */
     const char *sep = strstr(buffer, "\r\n\r\n");
@@ -323,47 +361,47 @@ static int parse_raw_request(
     if (sscanf(buffer, "%15s %2047s", method_out, path_out) != 2)
         return -1;
 
-    /* Body starts after the separator */
-    const char *body_start = end_of_headers + 4; /* skip \r\n\r\n */
-    /* Also handle \n\n case */
-    if (sep2 && !sep) {
-        body_start = end_of_headers + 2; /* skip \n\n */
-    }
-
-    size_t blen = 0;
-    const char *body_ptr = NULL;
-
-    if (body_start < buffer + strlen(buffer)) {
-        blen = strlen(body_start);
-        body_ptr = body_start;
-    }
-
-    *body_out = (char *)body_ptr;
-    *body_len_out = blen;
     return 0;
 }
 
 
 
+/*
+ * Locate the body according to the request headers.
+ *
+ * On success returns 0 and sets *body_out / *body_len_out. *body_heap is set
+ * to 1 only when *body_out points at a fresh allocation the caller must free;
+ * when the body already sits in the caller's buffer, *body_out points into
+ * that buffer and *body_heap is 0. Callers must therefore never free the body
+ * unless *body_heap is 1.
+ *
+ * Returns a negative value on failure.
+ */
 static int read_full_body(mnet_socket_t client, const char *buffer,
     ssize_t initial_received, char **body_out, size_t *body_len_out,
-    size_t max_body_size)
+    int *body_heap, size_t max_body_size)
 {
     const char *sep = strstr(buffer, "\r\n\r\n");
     const char *sep2 = strstr(buffer, "\n\n");
     const char *end_of_headers = sep ? sep : (sep2 ? sep2 : NULL);
+    size_t body_offset;
+    size_t initial_body_len;
+
+    *body_out = NULL;
+    *body_len_out = 0;
+    *body_heap = 0;
+
     if (end_of_headers == NULL) return -1;
 
-    const char *body_start = end_of_headers + (sep ? 4 : 2);
-    size_t initial_body_len = (size_t)(initial_received - (body_start - buffer));
+    body_offset = (size_t)(end_of_headers - buffer) + (sep ? 4 : 2);
+    initial_body_len = (size_t)initial_received - body_offset;
 
-    /* Find Content-Length header */
+    /* Find the Content-Length header. Only a line-initial match counts, so a
+       header such as "X-Content-Length:" is not mistaken for it. */
     const char *cl_header = NULL;
     const char *search = buffer;
     while ((search = strcasestr(search, "content-length:")) != NULL) {
-        const char *line_start = search;
-        while (line_start > buffer && *(line_start - 1) != '\n') line_start--;
-        if (line_start == buffer || *(line_start - 1) == '\n') {
+        if (search == buffer || search[-1] == '\n') {
             cl_header = search;
             break;
         }
@@ -371,26 +409,50 @@ static int read_full_body(mnet_socket_t client, const char *buffer,
     }
 
     size_t content_length = 0;
-    if (cl_header) {
+    if (cl_header != NULL) {
         const char *val = cl_header + 16;
+        const char *p;
+        int digit_seen = 0;
+        int overflow = 0;
+        size_t parsed = 0;
+
         while (*val == ' ' || *val == '\t') val++;
-        content_length = (size_t)strtoul(val, NULL, 10);
+
+        for (p = val; *p >= '0' && *p <= '9'; p++) {
+            digit_seen = 1;
+            if (parsed > (max_body_size / 10)) overflow = 1;
+            parsed = parsed * 10 + (size_t)(*p - '0');
+            if (parsed > max_body_size) overflow = 1;
+        }
+        /* The value must be a plain decimal number followed by end of line. */
+        if (!digit_seen || (*p != '\r' && *p != '\n')) return -1;
+        if (overflow) return -1;
+
+        content_length = parsed;
     }
 
     if (content_length == 0) {
-        *body_out = (char *)body_start;
+        *body_out = (char *)buffer + body_offset;
         *body_len_out = initial_body_len;
         return 0;
     }
 
     if (content_length > max_body_size) return -1;
 
+    if (initial_body_len >= content_length) {
+        /* Everything is already in the caller's buffer. Do not copy and do
+           not allocate; just point at it. */
+        *body_out = (char *)buffer + body_offset;
+        *body_len_out = content_length;
+        return 0;
+    }
+
     char *full_body = malloc(content_length + 1);
     if (full_body == NULL) return -1;
 
-    memcpy(full_body, body_start, initial_body_len);
-    size_t total_received = initial_body_len;
+    memcpy(full_body, buffer + body_offset, initial_body_len);
 
+    size_t total_received = initial_body_len;
     while (total_received < content_length) {
         ssize_t n = mnet_recv(client, full_body + total_received,
             content_length - total_received);
@@ -404,6 +466,7 @@ static int read_full_body(mnet_socket_t client, const char *buffer,
     full_body[content_length] = '\0';
     *body_out = full_body;
     *body_len_out = content_length;
+    *body_heap = 1;
     return 0;
 }
 
@@ -472,12 +535,16 @@ static void parse_cookies(const char *cookie_header,
     *out_count = idx;
 }
 
+/*
+ * Release the request extras.
+ *
+ * param_names and param_values are borrowed: param_names belongs to the route
+ * and param_values to the router (freed by mnet_match_params_free()). Only the
+ * query, header and cookie arrays are owned here.
+ */
 static void free_extras(request_extras_t *e)
 {
     if (e == NULL) return;
-    for (size_t i = 0; i < e->param_count; i++) {
-        free(e->param_values[i]);
-    }
     for (size_t i = 0; i < e->query_count; i++) {
         free(e->query_names[i]);
         free(e->query_values[i]);
@@ -509,14 +576,21 @@ static void send_response(mnet_socket_t client, const mnet_response_t *r,
         case 204: status_text = "No Content"; break;
         case 301: status_text = "Moved Permanently"; break;
         case 400: status_text = "Bad Request"; break;
+        case 403: status_text = "Forbidden"; break;
         case 404: status_text = "Not Found"; break;
         case 405: status_text = "Method Not Allowed"; break;
+        case 413: status_text = "Payload Too Large"; break;
+        case 431: status_text = "Request Header Fields Too Large"; break;
         case 500: status_text = "Internal Server Error"; break;
         default: status_text = "Unknown"; break;
     }
 
     const char *ct = r->content_type ?
         r->content_type : "application/octet-stream";
+
+    /* A content type taken from untrusted input must not be able to inject
+       CRLF and split the response. Reject rather than sanitize. */
+    if (!mnet_header_value_valid(ct)) return;
 
     char header[1024];
     int hlen;
@@ -557,6 +631,34 @@ static void send_response(mnet_socket_t client, const mnet_response_t *r,
             mnet_send(client, r->body, r->body_length);
         }
     }
+}
+
+static void send_simple_error(mnet_socket_t client, int status,
+    const char *status_text, const char *message, int debug)
+{
+    if (debug) {
+        fprintf(stderr, "[mnet] %d %s\n", status, message);
+    }
+
+    char body[256];
+    int blen = snprintf(body, sizeof(body),
+        "<!doctype html><html><head><title>%d %s</title></head>"
+        "<body><h1>%d %s</h1><p>%s</p></body></html>",
+        status, status_text, status, status_text, message);
+    if (blen < 0) return;
+
+    char header[512];
+    int hlen = snprintf(header, sizeof(header),
+        "HTTP/1.1 %d %s\r\n"
+        "Content-Length: %d\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n"
+        "Connection: close\r\n"
+        "\r\n",
+        status, status_text, blen);
+    if (hlen < 0 || (size_t)hlen >= sizeof(header)) return;
+
+    mnet_send(client, header, (size_t)hlen);
+    mnet_send(client, body, (size_t)blen);
 }
 
 static void send_not_found(mnet_socket_t client, const char *path, int debug,
@@ -641,36 +743,33 @@ static int parse_request(mnet_socket_t client, const char *buffer,
 
     char *body_ptr = NULL;
     size_t body_len = 0;
+    int body_heap = 0;
 
-    if (parse_raw_request(buffer, out->method, out->path, &body_ptr, &body_len) != 0) {
-        return -1;
+    if (parse_raw_request(buffer, out->method, out->path) != 0) {
+        return MNET_PARSE_BAD_REQUEST;
     }
 
     out->method_enum = mnet_parse_method(out->method);
     if (out->method_enum == (mnet_http_method_t)-1) {
-        return -1;
+        return MNET_PARSE_UNSUPPORTED_METHOD;
     }
 
-    char *full_body = NULL;
-    size_t full_body_len = 0;
-    if (read_full_body(client, buffer, received, &full_body, &full_body_len, max_body_size) != 0) {
-        return -1;
-    }
-    if (full_body != NULL) {
-        body_ptr = full_body;
-        body_len = full_body_len;
-        out->body_heap = 1;
-    }
+    int r = read_full_body(client, buffer, received, &body_ptr, &body_len,
+        &body_heap, max_body_size);
+    if (r != 0) return MNET_PARSE_TOO_LARGE;
 
     out->body = body_ptr;
     out->body_length = body_len;
+    out->body_heap = body_heap;
 
     const char *line_end = memchr(buffer, '\n',
         strstr(buffer, "\r\n\r\n") ? strstr(buffer, "\r\n\r\n") - buffer : 0);
     if (line_end) {
         const char *hdr_section = line_end + 1;
-        parse_headers(hdr_section, &out->extras.header_names,
-            &out->extras.header_values, &out->extras.header_count);
+        if (parse_headers(hdr_section, &out->extras.header_names,
+                &out->extras.header_values, &out->extras.header_count) != 0) {
+            return MNET_PARSE_TOO_LARGE;
+        }
 
         for (size_t i = 0; i < out->extras.header_count; i++) {
             if (strcasecmp(out->extras.header_names[i], "Cookie") == 0) {
@@ -699,14 +798,17 @@ static int parse_request(mnet_socket_t client, const char *buffer,
         strcpy(out->path_only, out->path);
     }
 
-    return 0;
+    return MNET_PARSE_OK;
 }
 
 static mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
-    const char **param_values, size_t param_count)
+    const char **param_values, size_t max_params, size_t *out_param_count)
 {
+    size_t param_count = 0;
     mnet_route_t *route = mnet_find_route(app, parsed->method_enum,
-        parsed->path_only, param_values, MNET_MAX_PARAMS);
+        parsed->path_only, param_values, max_params, &param_count);
+
+    *out_param_count = param_count;
 
     if (route == NULL) {
         if (app->not_found_handler) {
@@ -756,25 +858,66 @@ static mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
 
 static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 {
-    if (app->timeout_seconds > 0) {
-        mnet_set_socket_timeout(client, app->timeout_seconds);
-    }
+    int timeout = app->timeout_seconds > 0 ?
+        app->timeout_seconds : MNET_DEFAULT_TIMEOUT;
+    mnet_set_socket_timeout(client, timeout);
 
     int keep_alive = 0;
     do {
-        if (keep_alive && app->keep_alive_timeout > 0) {
-            mnet_set_socket_timeout(client, app->keep_alive_timeout);
+        if (keep_alive) {
+            /* Idle wait for the next request on a reused connection. */
+            int ka = app->keep_alive_timeout > 0 ?
+                app->keep_alive_timeout : MNET_DEFAULT_TIMEOUT;
+            mnet_set_socket_timeout(client, ka);
         }
 
         char buffer[MNET_REQUEST_BUFFER_SIZE];
-        ssize_t received = mnet_recv(client, buffer, sizeof(buffer) - 1);
-        if (received <= 0) break;
-        buffer[received] = '\0';
+        size_t used = 0;
+        int have_request = 0;
+        int too_large = 0;
+
+        /* Read until the end of the header block arrives, or the buffer is
+           full. Headers that do not fit are rejected, never truncated. */
+        while (used < sizeof(buffer) - 1) {
+            ssize_t n = mnet_recv(client, buffer + used,
+                sizeof(buffer) - 1 - used);
+            if (n <= 0) break;
+            used += (size_t)n;
+            buffer[used] = '\0';
+            if (strstr(buffer, "\r\n\r\n") != NULL ||
+                strstr(buffer, "\n\n") != NULL) {
+                have_request = 1;
+                break;
+            }
+        }
+
+        if (!have_request) {
+            if (used >= sizeof(buffer) - 1) too_large = 1;
+            /* Otherwise the client closed or timed out: nothing to answer. */
+            if (too_large) {
+                send_simple_error(client, 431, "Request Header Fields Too Large",
+                    "Request headers exceed the maximum size.", app->debug);
+            }
+            break;
+        }
 
         parsed_request_t parsed;
-        size_t max_body = app->max_body_size > 0 ? app->max_body_size : MNET_MAX_BODY_SIZE;
-        if (parse_request(client, buffer, received, &parsed, max_body) != 0) {
-            send_method_not_allowed(client, parsed.method, app->debug, keep_alive);
+        size_t max_body = app->max_body_size > 0 ?
+            app->max_body_size : MNET_MAX_BODY_SIZE;
+        int pr = parse_request(client, buffer, (ssize_t)used, &parsed, max_body);
+
+        if (pr != MNET_PARSE_OK) {
+            if (pr == MNET_PARSE_UNSUPPORTED_METHOD) {
+                send_method_not_allowed(client, parsed.method, app->debug, 0);
+            } else if (pr == MNET_PARSE_TOO_LARGE) {
+                send_simple_error(client, 413, "Payload Too Large",
+                    "Request body exceeds the maximum size.", app->debug);
+            } else {
+                send_simple_error(client, 400, "Bad Request",
+                    "The request could not be parsed.", app->debug);
+            }
+            free_extras(&parsed.extras);
+            if (parsed.body_heap) free(parsed.body);
             break;
         }
 
@@ -782,11 +925,9 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 
         const char *param_values[MNET_MAX_PARAMS] = {0};
         size_t param_count = 0;
-        if (parsed.extras.param_names) {
-            while (parsed.extras.param_names[param_count] != NULL) param_count++;
-        }
 
-        mnet_response_t response = dispatch(app, &parsed, param_values, param_count);
+        mnet_response_t response = dispatch(app, &parsed, param_values,
+            MNET_MAX_PARAMS, &param_count);
 
         if (response.status == 0 && app->not_found_handler == NULL) {
             send_not_found(client, parsed.path_only, app->debug, keep_alive);
@@ -878,14 +1019,31 @@ static mnet_response_t static_handler(mnet_request_t *req)
     if (*rel == '/') rel++;
 
     char fs_path[4096];
-    snprintf(fs_path, sizeof(fs_path), "%s/%s", cfg->fs_path, rel);
+    int written = snprintf(fs_path, sizeof(fs_path), "%s/%s", cfg->fs_path, rel);
+    if (written < 0 || (size_t)written >= sizeof(fs_path)) {
+        return mnet_error(404, "not found");
+    }
 
     char *real = mnet_realpath(fs_path);
     if (real == NULL) {
         return mnet_error(404, "not found");
     }
     char *base_real = mnet_realpath(cfg->fs_path);
-    if (base_real == NULL || strncmp(real, base_real, strlen(base_real)) != 0) {
+    if (base_real == NULL) {
+        free(real);
+        return mnet_error(404, "not found");
+    }
+
+    /* The resolved path must be the root itself or lie underneath it. A plain
+       prefix comparison would also accept a sibling such as /var/www2 when the
+       root is /var/www, so check the separator boundary too. */
+    size_t base_len = strlen(base_real);
+    int inside = (strncmp(real, base_real, base_len) == 0) &&
+                 (real[base_len] == '\0' ||
+                  real[base_len] == '/' ||
+                  base_real[base_len - 1] == '/');
+
+    if (!inside) {
         free(real);
         free(base_real);
         return mnet_error(403, "forbidden");
@@ -985,9 +1143,17 @@ void mnet_static(mnet_app_t *app, const char *url_prefix,
     char pattern[2048];
     snprintf(pattern, sizeof(pattern), "%s/*", url_prefix);
 
+    char *path_copy = strdup(pattern);
+    if (path_copy == NULL) {
+        free(cfg->url_prefix);
+        free(cfg->fs_path);
+        free(cfg);
+        return;
+    }
+
     mnet_route_t *r = &app->routes[app->route_count];
     r->method = MNET_HTTP_GET;
-    r->path = strdup(pattern);
+    r->path = path_copy;
     r->handler = static_handler;
     r->param_names = NULL;
     r->legacy_handler = NULL;

@@ -23,8 +23,12 @@ int mnet_route_match(const mnet_route_t *route,
                 size_t seg_len = strlen(request_path + rpos);
                 char *value = malloc(seg_len + 1);
                 if (value == NULL) {
+                    /* Allocate a placeholder so the caller's slot bookkeeping
+                       stays consistent, then report failure (0 = no match). */
+                    out_values[n] = NULL;
+                    n++;
                     mnet_match_params_free(out_values, (int)n);
-                    return -1;
+                    return 0;
                 }
                 memcpy(value, request_path + rpos, seg_len);
                 value[seg_len] = '\0';
@@ -43,8 +47,10 @@ int mnet_route_match(const mnet_route_t *route,
                 size_t seg_len = (size_t)(request_path + rpos - seg_start);
                 char *value = malloc(seg_len + 1);
                 if (value == NULL) {
+                    out_values[n] = NULL;
+                    n++;
                     mnet_match_params_free(out_values, (int)n);
-                    return -1;
+                    return 0;
                 }
                 memcpy(value, seg_start, seg_len);
                 value[seg_len] = '\0';

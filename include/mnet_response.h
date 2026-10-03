@@ -9,6 +9,7 @@ typedef struct mnet_response {
     const char *content_type;
     const void *body;
     size_t body_length;
+    int chunked;
 } mnet_response_t;
 
 mnet_response_t mnet_text(const char *text);
@@ -18,6 +19,8 @@ mnet_response_t mnet_jsonf(const char *format, ...);
 mnet_response_t mnet_jsonfv(const char *format, va_list args);
 mnet_response_t mnet_error(int status, const char *message);
 mnet_response_t mnet_status(int status, const char *body);
+mnet_response_t mnet_chunked(int status, const char *content_type,
+    const void *body, size_t body_length);
 
 size_t mnet_url_decode(char *out, size_t out_size, const char *s);
 

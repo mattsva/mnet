@@ -399,6 +399,16 @@ static void test_static_route_cleanup(void)
     printf("  PASS test_static_route_cleanup\n");
 }
 
+static void test_mnet_chunked(void)
+{
+    const char *body = "hello chunked world";
+    mnet_response_t r = mnet_chunked(200, "text/plain", body, strlen(body));
+    assert(r.status == 200);
+    assert(r.chunked == 1);
+    assert(r.body_length == strlen(body));
+    printf("  PASS test_mnet_chunked\n");
+}
+
 int main(void)
 {
     printf("Running mnet tests...\n");
@@ -435,6 +445,7 @@ int main(void)
     test_timeout();
     test_debug_per_app();
     test_static_route_cleanup();
+    test_mnet_chunked();
 
     printf("\nAll tests passed!\n");
     return 0;

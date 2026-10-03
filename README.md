@@ -81,6 +81,10 @@ mnet_set_timeout(app, 30);
 
 Sets a read/write timeout in seconds on client connections. Without this, a slow or malicious client can hang the server indefinitely.
 
+### Keep-alive connections
+
+The server honors `Connection: keep-alive` from HTTP/1.1 clients and reuses the connection for subsequent requests. Use `mnet_chunked()` for responses where the body length is not known upfront.
+
 ### Wildcard routes
 
 Routes ending with `*` match any remaining path. The matched portion is available as a path parameter:
@@ -136,6 +140,7 @@ return mnet_json("{\"ok\":true}");         // 200, application/json
 return mnet_jsonf("{\"id\":\"%s\"}", id);  // 200, application/json (printf-style, %s escaped)
 return mnet_error(400, "bad request");     // error status + text body
 return mnet_status(201, "created");        // custom status + text body
+return mnet_chunked(200, "text/html", html, html_len); // chunked transfer
 ```
 
 ### Path parameters

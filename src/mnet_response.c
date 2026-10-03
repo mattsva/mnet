@@ -337,3 +337,16 @@ mnet_response_t mnet_status(int status, const char *body)
     };
     return r;
 }
+
+mnet_response_t mnet_chunked(int status, const char *content_type,
+    const void *body, size_t body_length)
+{
+    mnet_response_t r = {
+        .status = status,
+        .content_type = content_type ? content_type : "application/octet-stream",
+        .body = body,
+        .body_length = body_length,
+        .chunked = 1,
+    };
+    return r;
+}

@@ -496,7 +496,7 @@ static void free_extras(request_extras_t *e)
 }
 
 static void send_response(mnet_socket_t client, const mnet_response_t *r,
-    int head_only)
+    int head_only, int keep_alive)
 {
     const char *status_text = "OK";
     switch (r->status) {
@@ -515,24 +515,48 @@ static void send_response(mnet_socket_t client, const mnet_response_t *r,
         r->content_type : "application/octet-stream";
 
     char header[1024];
-    int hlen = snprintf(header, sizeof(header),
-        "HTTP/1.1 %d %s\r\n"
-        "Content-Length: %zu\r\n"
-        "Content-Type: %s\r\n"
-        "Connection: close\r\n"
-        "\r\n",
-        r->status, status_text, r->body_length, ct);
+    int hlen;
+
+    if (r->chunked) {
+        hlen = snprintf(header, sizeof(header),
+            "HTTP/1.1 %d %s\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "Content-Type: %s\r\n"
+            "Connection: %s\r\n"
+            "\r\n",
+            r->status, status_text, ct, keep_alive ? "keep-alive" : "close");
+    } else {
+        hlen = snprintf(header, sizeof(header),
+            "HTTP/1.1 %d %s\r\n"
+            "Content-Length: %zu\r\n"
+            "Content-Type: %s\r\n"
+            "Connection: %s\r\n"
+            "\r\n",
+            r->status, status_text, r->body_length, ct,
+            keep_alive ? "keep-alive" : "close");
+    }
 
     if (hlen < 0 || (size_t)hlen >= sizeof(header)) return;
 
     mnet_send(client, header, (size_t)hlen);
 
     if (!head_only && r->body && r->body_length > 0) {
-        mnet_send(client, r->body, r->body_length);
+        if (r->chunked) {
+            char chunk_header[32];
+            int chlen = snprintf(chunk_header, sizeof(chunk_header),
+                "%zx\r\n", r->body_length);
+            mnet_send(client, chunk_header, (size_t)chlen);
+            mnet_send(client, r->body, r->body_length);
+            mnet_send(client, "\r\n", 2);
+            mnet_send(client, "0\r\n\r\n", 5);
+        } else {
+            mnet_send(client, r->body, r->body_length);
+        }
     }
 }
 
-static void send_not_found(mnet_socket_t client, const char *path, int debug)
+static void send_not_found(mnet_socket_t client, const char *path, int debug,
+    int keep_alive)
 {
     if (debug) {
         fprintf(stderr, "[mnet] 404  %s %s\n", "GET", path);
@@ -549,16 +573,17 @@ static void send_not_found(mnet_socket_t client, const char *path, int debug)
         "HTTP/1.1 404 Not Found\r\n"
         "Content-Length: %zu\r\n"
         "Content-Type: text/html; charset=utf-8\r\n"
-        "Connection: close\r\n"
+        "Connection: %s\r\n"
         "\r\n",
-        sizeof(body) - 1);
+        sizeof(body) - 1, keep_alive ? "keep-alive" : "close");
     if (hlen > 0 && (size_t)hlen < sizeof(header)) {
         mnet_send(client, header, (size_t)hlen);
         mnet_send(client, body, sizeof(body) - 1);
     }
 }
 
-static void send_method_not_allowed(mnet_socket_t client, const char *method, int debug)
+static void send_method_not_allowed(mnet_socket_t client, const char *method,
+    int debug, int keep_alive)
 {
     if (debug) {
         fprintf(stderr, "[mnet] 405  %s\n", method);
@@ -575,9 +600,9 @@ static void send_method_not_allowed(mnet_socket_t client, const char *method, in
         "HTTP/1.1 405 Method Not Allowed\r\n"
         "Content-Length: %zu\r\n"
         "Content-Type: text/html; charset=utf-8\r\n"
-        "Connection: close\r\n"
+        "Connection: %s\r\n"
         "\r\n",
-        sizeof(body) - 1);
+        sizeof(body) - 1, keep_alive ? "keep-alive" : "close");
     if (hlen > 0 && (size_t)hlen < sizeof(header)) {
         mnet_send(client, header, (size_t)hlen);
         mnet_send(client, body, sizeof(body) - 1);
@@ -594,6 +619,7 @@ typedef struct {
     int body_heap;
     mnet_http_method_t method_enum;
     request_extras_t extras;
+    int keep_alive;
 } parsed_request_t;
 
 static int parse_request(mnet_socket_t client, const char *buffer,
@@ -606,6 +632,7 @@ static int parse_request(mnet_socket_t client, const char *buffer,
     out->body = NULL;
     out->body_length = 0;
     out->body_heap = 0;
+    out->keep_alive = 0;
     memset(&out->extras, 0, sizeof(out->extras));
 
     char *body_ptr = NULL;
@@ -646,7 +673,11 @@ static int parse_request(mnet_socket_t client, const char *buffer,
                 parse_cookies(out->extras.header_values[i],
                     &out->extras.cookie_names, &out->extras.cookie_values,
                     &out->extras.cookie_count);
-                break;
+            }
+            if (strcasecmp(out->extras.header_names[i], "Connection") == 0) {
+                if (strcasecmp(out->extras.header_values[i], "keep-alive") == 0) {
+                    out->keep_alive = 1;
+                }
             }
         }
     }
@@ -729,38 +760,44 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
         setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     }
 
-    char buffer[MNET_REQUEST_BUFFER_SIZE];
-    ssize_t received = mnet_recv(client, buffer, sizeof(buffer) - 1);
-    if (received <= 0) return;
-    buffer[received] = '\0';
+    int keep_alive = 0;
+    do {
+        char buffer[MNET_REQUEST_BUFFER_SIZE];
+        ssize_t received = mnet_recv(client, buffer, sizeof(buffer) - 1);
+        if (received <= 0) break;
+        buffer[received] = '\0';
 
-    parsed_request_t parsed;
-    if (parse_request(client, buffer, received, &parsed) != 0) {
-        send_method_not_allowed(client, parsed.method, app->debug);
-        return;
-    }
-
-    const char *param_values[MNET_MAX_PARAMS] = {0};
-    size_t param_count = 0;
-    if (parsed.extras.param_names) {
-        while (parsed.extras.param_names[param_count] != NULL) param_count++;
-    }
-
-    mnet_response_t response = dispatch(app, &parsed, param_values, param_count);
-
-    if (response.status == 0 && app->not_found_handler == NULL) {
-        send_not_found(client, parsed.path_only, app->debug);
-    } else {
-        if (app->debug) {
-            fprintf(stderr, "[mnet] %d %s %s\n",
-                response.status, parsed.method, parsed.path_only);
+        parsed_request_t parsed;
+        if (parse_request(client, buffer, received, &parsed) != 0) {
+            send_method_not_allowed(client, parsed.method, app->debug, keep_alive);
+            break;
         }
-        send_response(client, &response, parsed.method_enum == MNET_HTTP_HEAD);
-    }
 
-    mnet_match_params_free(param_values, (int)param_count);
-    free_extras(&parsed.extras);
-    if (parsed.body_heap) free(parsed.body);
+        keep_alive = parsed.keep_alive;
+
+        const char *param_values[MNET_MAX_PARAMS] = {0};
+        size_t param_count = 0;
+        if (parsed.extras.param_names) {
+            while (parsed.extras.param_names[param_count] != NULL) param_count++;
+        }
+
+        mnet_response_t response = dispatch(app, &parsed, param_values, param_count);
+
+        if (response.status == 0 && app->not_found_handler == NULL) {
+            send_not_found(client, parsed.path_only, app->debug, keep_alive);
+        } else {
+            if (app->debug) {
+                fprintf(stderr, "[mnet] %d %s %s\n",
+                    response.status, parsed.method, parsed.path_only);
+            }
+            send_response(client, &response, parsed.method_enum == MNET_HTTP_HEAD,
+                keep_alive);
+        }
+
+        mnet_match_params_free(param_values, (int)param_count);
+        free_extras(&parsed.extras);
+        if (parsed.body_heap) free(parsed.body);
+    } while (keep_alive);
 }
 
 static mnet_app_t *g_running_app = NULL;

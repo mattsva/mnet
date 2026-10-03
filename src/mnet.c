@@ -1,11 +1,15 @@
 #include "mnet_socket.h"
+#include "mnet_compat.h"
 
 #include <errno.h>
-#include <netdb.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifndef _WIN32
+#include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 mnet_socket_t mnet_tcp_listen(
     uint16_t port,

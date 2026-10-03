@@ -3,6 +3,10 @@ project('mnet', 'c',
     default_options: ['c_std=c17', 'c_args=-D_POSIX_C_SOURCE=200112L']
 )
 
+if host_machine.system() == 'darwin'
+    add_project_arguments('-D_DARWIN_C_SOURCE', language: 'c')
+endif
+
 # Source files
 mnet_sources = files(
     'src/mnet.c',

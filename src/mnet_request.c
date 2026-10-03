@@ -1,7 +1,7 @@
 #define _GNU_SOURCE
 #include "mnet_request.h"
+#include "mnet_compat.h"
 #include <string.h>
-#include <strings.h>
 
 const char *mnet_request_method(const mnet_request_t *request)
 {

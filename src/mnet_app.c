@@ -1,18 +1,22 @@
 #define _GNU_SOURCE
 #include "mnet_app.h"
 #include "mnet_socket.h"
-#include "mnet_request.h"
+#include "mnet_socket.h"
 #include "mnet_response.h"
 #include "mnet_router.h"
+#include "mnet_compat.h"
 
 #include <ctype.h>
 #include <errno.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef _WIN32
+#include <signal.h>
 #include <strings.h>
 #include <sys/socket.h>
+#endif
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>

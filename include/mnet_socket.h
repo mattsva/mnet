@@ -1,6 +1,7 @@
 #ifndef MNET_SOCKET_H
 #define MNET_SOCKET_H
 
+#include "mnet_compat.h"
 #include <stdint.h>
 #include <sys/types.h>
 

@@ -1,6 +1,7 @@
 #ifndef MNET_H
 #define MNET_H
 
+#include "mnet_compat.h"
 #include "mnet_app.h"
 #include "mnet_request.h"
 #include "mnet_response.h"

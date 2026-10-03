@@ -1,6 +1,9 @@
 CC      = gcc
 CFLAGS  = -std=c17 -Wall -Wextra -Wpedantic -Werror \
           -D_POSIX_C_SOURCE=200112L -Iinclude
+ifeq ($(shell uname -s),Darwin)
+    CFLAGS += -D_DARWIN_C_SOURCE
+endif
 
 # Source files
 SRCS    = src/mnet.c src/mnet_app.c src/mnet_response.c \

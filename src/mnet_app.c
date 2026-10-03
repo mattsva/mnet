@@ -11,7 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -32,6 +34,7 @@ struct mnet_app {
     int debug;
     mnet_response_t (*not_found_handler)(mnet_request_t *req);
     mnet_middleware_t middleware;
+    int timeout_seconds;
 };
 static int mnet_add_route(
     mnet_app_t *app,
@@ -495,6 +498,14 @@ static void send_method_not_allowed(mnet_socket_t client, const char *method)
 
 static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 {
+    if (app->timeout_seconds > 0) {
+        struct timeval tv;
+        tv.tv_sec = app->timeout_seconds;
+        tv.tv_usec = 0;
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    }
+
     char buffer[MNET_REQUEST_BUFFER_SIZE];
     ssize_t received = mnet_recv(client, buffer, sizeof(buffer) - 1);
     if (received <= 0) return;
@@ -761,6 +772,11 @@ static mnet_response_t static_handler(mnet_request_t *req)
         .body_length = (size_t)total,
     };
     return r;
+}
+
+void mnet_set_timeout(mnet_app_t *app, int seconds)
+{
+    if (app != NULL) app->timeout_seconds = seconds;
 }
 
 void mnet_static(mnet_app_t *app, const char *url_prefix,

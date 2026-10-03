@@ -341,6 +341,16 @@ static void test_middleware(void)
     printf("  PASS test_middleware\n");
 }
 
+static void test_timeout(void)
+{
+    mnet_app_t *app = mnet_create();
+    assert(app != NULL);
+
+    mnet_set_timeout(app, 30);
+    mnet_destroy(app);
+    printf("  PASS test_timeout\n");
+}
+
 int main(void)
 {
     printf("Running mnet tests...\n");
@@ -372,6 +382,7 @@ int main(void)
 
     test_http_method_enum();
     test_middleware();
+    test_timeout();
 
     printf("\nAll tests passed!\n");
     return 0;

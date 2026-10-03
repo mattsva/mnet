@@ -73,6 +73,14 @@ mnet_static(app, "/static", "/var/www/files");
 
 Serves files from `/var/www/files` under the `/static` URL prefix. Path traversal is prevented via `realpath` checks. Common MIME types are detected from file extensions.
 
+### Socket timeouts
+
+```c
+mnet_set_timeout(app, 30);
+```
+
+Sets a read/write timeout in seconds on client connections. Without this, a slow or malicious client can hang the server indefinitely.
+
 ### Wildcard routes
 
 Routes ending with `*` match any remaining path. The matched portion is available as a path parameter:

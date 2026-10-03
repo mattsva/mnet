@@ -43,4 +43,6 @@ void mnet_use(mnet_app_t *app, mnet_middleware_t middleware);
 void mnet_static(mnet_app_t *app, const char *url_prefix,
     const char *fs_path);
 
+void mnet_set_timeout(mnet_app_t *app, int seconds);
+
 #endif

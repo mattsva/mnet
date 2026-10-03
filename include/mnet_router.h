@@ -10,7 +10,9 @@ typedef enum {
     MNET_HTTP_POST,
     MNET_HTTP_PUT,
     MNET_HTTP_PATCH,
-    MNET_HTTP_DELETE
+    MNET_HTTP_DELETE,
+    MNET_HTTP_HEAD,
+    MNET_HTTP_OPTIONS
 } mnet_http_method_t;
 
 typedef void (*mnet_handler_legacy_t)(

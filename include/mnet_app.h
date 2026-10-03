@@ -23,11 +23,13 @@ int mnet_route(
     mnet_handler_t handler);
 
 // Those are Macros for easier route registration, e.g. MNET_GET(app, "/path", handler)
-#define MNET_GET(app, path, handler)   mnet_route((app), MNET_HTTP_GET, (path), (handler))
-#define MNET_POST(app, path, handler)  mnet_route((app), MNET_HTTP_POST, (path), (handler))
-#define MNET_PUT(app, path, handler)   mnet_route((app), MNET_HTTP_PUT, (path), (handler))
-#define MNET_PATCH(app, path, handler) mnet_route((app), MNET_HTTP_PATCH, (path), (handler))
-#define MNET_DELETE(app, path, handler) mnet_route((app), MNET_HTTP_DELETE, (path), (handler))
+#define MNET_GET(app, path, handler)     mnet_route((app), MNET_HTTP_GET, (path), (handler))
+#define MNET_POST(app, path, handler)    mnet_route((app), MNET_HTTP_POST, (path), (handler))
+#define MNET_PUT(app, path, handler)     mnet_route((app), MNET_HTTP_PUT, (path), (handler))
+#define MNET_PATCH(app, path, handler)   mnet_route((app), MNET_HTTP_PATCH, (path), (handler))
+#define MNET_DELETE(app, path, handler)  mnet_route((app), MNET_HTTP_DELETE, (path), (handler))
+#define MNET_HEAD(app, path, handler)    mnet_route((app), MNET_HTTP_HEAD, (path), (handler))
+#define MNET_OPTIONS(app, path, handler) mnet_route((app), MNET_HTTP_OPTIONS, (path), (handler))
 
 #define MNET_HANDLER(name) \
     static mnet_response_t name(mnet_request_t *req)

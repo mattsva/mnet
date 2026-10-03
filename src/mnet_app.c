@@ -131,11 +131,13 @@ static mnet_route_t *mnet_find_route(
 
 static mnet_http_method_t mnet_parse_method(const char *method)
 {
-    if (strcmp(method, "GET")    == 0) return MNET_HTTP_GET;
-    if (strcmp(method, "POST")   == 0) return MNET_HTTP_POST;
-    if (strcmp(method, "PUT")    == 0) return MNET_HTTP_PUT;
-    if (strcmp(method, "PATCH")  == 0) return MNET_HTTP_PATCH;
-    if (strcmp(method, "DELETE") == 0) return MNET_HTTP_DELETE;
+    if (strcmp(method, "GET")     == 0) return MNET_HTTP_GET;
+    if (strcmp(method, "POST")    == 0) return MNET_HTTP_POST;
+    if (strcmp(method, "PUT")     == 0) return MNET_HTTP_PUT;
+    if (strcmp(method, "PATCH")   == 0) return MNET_HTTP_PATCH;
+    if (strcmp(method, "DELETE")  == 0) return MNET_HTTP_DELETE;
+    if (strcmp(method, "HEAD")    == 0) return MNET_HTTP_HEAD;
+    if (strcmp(method, "OPTIONS") == 0) return MNET_HTTP_OPTIONS;
     return (mnet_http_method_t)-1;
 }
 
@@ -398,7 +400,8 @@ static void free_extras(request_extras_t *e)
     memset(e, 0, sizeof(*e));
 }
 
-static void send_response(mnet_socket_t client, const mnet_response_t *r)
+static void send_response(mnet_socket_t client, const mnet_response_t *r,
+    int head_only)
 {
     const char *status_text = "OK";
     switch (r->status) {
@@ -429,7 +432,7 @@ static void send_response(mnet_socket_t client, const mnet_response_t *r)
 
     mnet_send(client, header, (size_t)hlen);
 
-    if (r->body && r->body_length > 0) {
+    if (!head_only && r->body && r->body_length > 0) {
         mnet_send(client, r->body, r->body_length);
     }
 }
@@ -571,7 +574,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
                 fprintf(stderr, "[mnet] %d %s %s\n",
                     response.status, method, path_only);
             }
-            send_response(client, &response);
+            send_response(client, &response, 0);
         } else {
             send_not_found(client, path_only);
         }
@@ -617,7 +620,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
                 response.status, method, path_only);
         }
 
-        send_response(client, &response);
+        send_response(client, &response, hm == MNET_HTTP_HEAD);
 
         mnet_match_params_free(param_values, (int)pc);
     }

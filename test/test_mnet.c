@@ -301,6 +301,8 @@ static void test_http_method_enum(void)
     assert(MNET_HTTP_PUT == 2);
     assert(MNET_HTTP_PATCH == 3);
     assert(MNET_HTTP_DELETE == 4);
+    assert(MNET_HTTP_HEAD == 5);
+    assert(MNET_HTTP_OPTIONS == 6);
     printf("  PASS test_http_method_enum\n");
 }
 

@@ -114,6 +114,7 @@ static void test_mnet_request_param(void)
     req.path_param_names = (const char *[]){"id", "name", NULL};
     req.path_param_values = (const char *[]){"42", "Alice", NULL};
     req.path_param_count = 2;
+    req.extras = NULL;
 
     assert(strcmp(MNET_PARAM(&req, "id"), "42") == 0);
     assert(strcmp(MNET_PARAM(&req, "name"), "Alice") == 0);

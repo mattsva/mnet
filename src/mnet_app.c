@@ -309,23 +309,11 @@ static int parse_raw_request(
     return 0;
 }
 
-typedef struct {
-    char **param_names;
-    char **param_values;
-    size_t param_count;
-    char **query_names;
-    char **query_values;
-    size_t query_count;
-    char **header_names;
-    char **header_values;
-    size_t header_count;
-} request_extras_t;
 
-static request_extras_t extras = {0};
 
-static void reset_extras(void)
+static void free_extras(request_extras_t *e)
 {
-    request_extras_t *e = &extras;
+    if (e == NULL) return;
     for (size_t i = 0; i < e->param_count; i++) {
         free(e->param_values[i]);
     }
@@ -342,17 +330,6 @@ static void reset_extras(void)
     free(e->header_names);
     free(e->header_values);
     memset(e, 0, sizeof(*e));
-}
-
-static void populate_extras(
-    const char **param_values,
-    int param_count,
-    const char **param_names)
-{
-    request_extras_t *e = &extras;
-    e->param_names = (char **)param_names;
-    e->param_count = param_count;
-    e->param_values = (char **)param_values;
 }
 
 static void send_response(mnet_socket_t client, const mnet_response_t *r)
@@ -468,18 +445,15 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
         return;
     }
 
+    request_extras_t extras = {0};
+
     /* Parse headers */
     const char *line_end = memchr(buffer, '\n',
         strstr(buffer, "\r\n\r\n") ? strstr(buffer, "\r\n\r\n") - buffer : 0);
     if (line_end) {
         const char *hdr_section = line_end + 1;
-        char **h_names = NULL;
-        char **h_values = NULL;
-        size_t h_count = 0;
-        parse_headers(hdr_section, &h_names, &h_values, &h_count);
-        extras.header_names = h_names;
-        extras.header_values = h_values;
-        extras.header_count = h_count;
+        parse_headers(hdr_section, &extras.header_names, &extras.header_values,
+            &extras.header_count);
     }
 
     /* Parse query string */
@@ -490,13 +464,8 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
         memcpy(path_only, path, plen);
         path_only[plen] = '\0';
         qs++;
-        char **q_names = NULL;
-        char **q_values = NULL;
-        size_t q_count = 0;
-        parse_query_string(qs, &q_names, &q_values, &q_count);
-        extras.query_names = q_names;
-        extras.query_values = q_values;
-        extras.query_count = q_count;
+        parse_query_string(qs, &extras.query_names, &extras.query_values,
+            &extras.query_count);
     } else {
         strcpy(path_only, path);
     }
@@ -515,6 +484,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
                 .path = path_only,
                 .body = NULL,
                 .body_length = 0,
+                .extras = &extras,
             };
             response = app->not_found_handler(&nf_req);
             if (app_debug) {
@@ -532,6 +502,10 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
             while (route->param_names[pc] != NULL) pc++;
         }
 
+        extras.param_names = (char **)route->param_names;
+        extras.param_count = (int)pc;
+        extras.param_values = (char **)param_values;
+
         mnet_request_t req = {
             .method = method,
             .path = path_only,
@@ -547,10 +521,8 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
             .header_names = (const char **)extras.header_names,
             .header_values = (const char **)extras.header_values,
             .header_count = (int)extras.header_count,
+            .extras = &extras,
         };
-
-        /* Populate extras for the accessor macros */
-        populate_extras(param_values, (int)pc, route->param_names);
 
         /* Call handler */
         response = route->handler(&req);
@@ -564,7 +536,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
         send_response(client, &response);
     }
 
-    reset_extras();
+    free_extras(&extras);
 }
 
 static mnet_app_t *g_running_app = NULL;

@@ -3,6 +3,18 @@
 
 #include <stddef.h>
 
+typedef struct {
+    char **param_names;
+    char **param_values;
+    size_t param_count;
+    char **query_names;
+    char **query_values;
+    size_t query_count;
+    char **header_names;
+    char **header_values;
+    size_t header_count;
+} request_extras_t;
+
 typedef struct mnet_request {
     const char *method;
     const char *path;
@@ -22,6 +34,8 @@ typedef struct mnet_request {
     int         header_count;
     const char **header_names;
     const char **header_values;
+
+    request_extras_t *extras;
 } mnet_request_t;
 
 const char *mnet_request_method(const mnet_request_t *request);

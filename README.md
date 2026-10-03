@@ -102,6 +102,8 @@ Routes like `/api/users/:id` or `/api/posts/:post_id/comments/:comment_id` are s
 | `MNET_BODY(req)` | `mnet_request_body(req)` |
 | `MNET_BODY_LEN(req)` | `mnet_request_body_length(req)` |
 
+The `mnet_request_t` struct includes an `extras` field (a `request_extras_t *`) that holds the underlying name/value arrays for path params, query params, and headers. This is managed internally by the framework and can be ignored in normal handler code.
+
 ### HTTP methods
 
 ```c

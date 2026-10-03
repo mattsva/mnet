@@ -409,6 +409,42 @@ static void test_mnet_chunked(void)
     printf("  PASS test_mnet_chunked\n");
 }
 
+static void test_max_connections(void)
+{
+    mnet_app_t *app = mnet_create();
+    assert(app != NULL);
+
+    mnet_set_max_connections(app, 10);
+    mnet_set_max_connections(app, 0);
+
+    mnet_destroy(app);
+    printf("  PASS test_max_connections\n");
+}
+
+static void test_keep_alive_timeout(void)
+{
+    mnet_app_t *app = mnet_create();
+    assert(app != NULL);
+
+    mnet_set_keep_alive_timeout(app, 30);
+    mnet_set_keep_alive_timeout(app, 0);
+
+    mnet_destroy(app);
+    printf("  PASS test_keep_alive_timeout\n");
+}
+
+static void test_max_body_size(void)
+{
+    mnet_app_t *app = mnet_create();
+    assert(app != NULL);
+
+    mnet_set_max_body_size(app, 1024 * 1024);
+    mnet_set_max_body_size(app, 0);
+
+    mnet_destroy(app);
+    printf("  PASS test_max_body_size\n");
+}
+
 int main(void)
 {
     printf("Running mnet tests...\n");
@@ -446,6 +482,9 @@ int main(void)
     test_debug_per_app();
     test_static_route_cleanup();
     test_mnet_chunked();
+    test_max_connections();
+    test_keep_alive_timeout();
+    test_max_body_size();
 
     printf("\nAll tests passed!\n");
     return 0;

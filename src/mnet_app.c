@@ -15,6 +15,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -39,6 +40,9 @@ struct mnet_app {
     mnet_response_t (*not_found_handler)(mnet_request_t *req);
     mnet_middleware_t middleware;
     int timeout_seconds;
+    int max_connections;
+    int keep_alive_timeout;
+    size_t max_body_size;
 };
 static int mnet_add_route(
     mnet_app_t *app,
@@ -343,7 +347,8 @@ static int parse_raw_request(
 
 
 static int read_full_body(mnet_socket_t client, const char *buffer,
-    ssize_t initial_received, char **body_out, size_t *body_len_out)
+    ssize_t initial_received, char **body_out, size_t *body_len_out,
+    size_t max_body_size)
 {
     const char *sep = strstr(buffer, "\r\n\r\n");
     const char *sep2 = strstr(buffer, "\n\n");
@@ -379,7 +384,7 @@ static int read_full_body(mnet_socket_t client, const char *buffer,
         return 0;
     }
 
-    if (content_length > MNET_MAX_BODY_SIZE) return -1;
+    if (content_length > max_body_size) return -1;
 
     char *full_body = malloc(content_length + 1);
     if (full_body == NULL) return -1;
@@ -623,7 +628,7 @@ typedef struct {
 } parsed_request_t;
 
 static int parse_request(mnet_socket_t client, const char *buffer,
-    ssize_t received, parsed_request_t *out)
+    ssize_t received, parsed_request_t *out, size_t max_body_size)
 {
     out->method[0] = '\0';
     out->path[0] = '\0';
@@ -649,7 +654,7 @@ static int parse_request(mnet_socket_t client, const char *buffer,
 
     char *full_body = NULL;
     size_t full_body_len = 0;
-    if (read_full_body(client, buffer, received, &full_body, &full_body_len) != 0) {
+    if (read_full_body(client, buffer, received, &full_body, &full_body_len, max_body_size) != 0) {
         return -1;
     }
     if (full_body != NULL) {
@@ -762,13 +767,21 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 
     int keep_alive = 0;
     do {
+        if (keep_alive && app->keep_alive_timeout > 0) {
+            struct timeval tv;
+            tv.tv_sec = app->keep_alive_timeout;
+            tv.tv_usec = 0;
+            setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        }
+
         char buffer[MNET_REQUEST_BUFFER_SIZE];
         ssize_t received = mnet_recv(client, buffer, sizeof(buffer) - 1);
         if (received <= 0) break;
         buffer[received] = '\0';
 
         parsed_request_t parsed;
-        if (parse_request(client, buffer, received, &parsed) != 0) {
+        size_t max_body = app->max_body_size > 0 ? app->max_body_size : MNET_MAX_BODY_SIZE;
+        if (parse_request(client, buffer, received, &parsed, max_body) != 0) {
             send_method_not_allowed(client, parsed.method, app->debug, keep_alive);
             break;
         }
@@ -801,6 +814,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 }
 
 static mnet_app_t *g_running_app = NULL;
+static volatile int g_active_connections = 0;
 
 static void sig_handler(int signum)
 {
@@ -928,6 +942,21 @@ void mnet_set_timeout(mnet_app_t *app, int seconds)
     if (app != NULL) app->timeout_seconds = seconds;
 }
 
+void mnet_set_max_connections(mnet_app_t *app, int max_connections)
+{
+    if (app != NULL) app->max_connections = max_connections;
+}
+
+void mnet_set_keep_alive_timeout(mnet_app_t *app, int seconds)
+{
+    if (app != NULL) app->keep_alive_timeout = seconds;
+}
+
+void mnet_set_max_body_size(mnet_app_t *app, size_t max_body_size)
+{
+    if (app != NULL) app->max_body_size = max_body_size;
+}
+
 void mnet_static(mnet_app_t *app, const char *url_prefix,
     const char *fs_path)
 {
@@ -1002,8 +1031,22 @@ int mnet_run(mnet_app_t *app, uint16_t port)
             if (errno == EINTR) continue;
             break;
         }
+
+        if (app->max_connections > 0) {
+            while (g_active_connections >= app->max_connections && app->running) {
+                struct timespec ts = {0, 100000000}; /* 100ms */
+                nanosleep(&ts, NULL);
+            }
+            if (!app->running) {
+                mnet_close(client);
+                break;
+            }
+        }
+
+        __sync_fetch_and_add(&g_active_connections, 1);
         mnet_handle_client(app, client);
         mnet_close(client);
+        __sync_fetch_and_sub(&g_active_connections, 1);
     }
 
     mnet_close(server);

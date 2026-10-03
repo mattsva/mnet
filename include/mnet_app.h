@@ -45,4 +45,15 @@ void mnet_static(mnet_app_t *app, const char *url_prefix,
 
 void mnet_set_timeout(mnet_app_t *app, int seconds);
 
+/* Optional configuration. All values are optional; 0 means "use default". */
+
+/* Maximum number of concurrent connections. 0 = unlimited (default). */
+void mnet_set_max_connections(mnet_app_t *app, int max_connections);
+
+/* Keep-alive idle timeout in seconds. 0 = no timeout (default). */
+void mnet_set_keep_alive_timeout(mnet_app_t *app, int seconds);
+
+/* Maximum request body size in bytes. 0 = 16 MB (default). */
+void mnet_set_max_body_size(mnet_app_t *app, size_t max_body_size);
+
 #endif

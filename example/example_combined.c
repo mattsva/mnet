@@ -219,6 +219,11 @@ int main(void)
     mnet_set_debug(app, 1);
     mnet_set_not_found_handler(app, custom_404);
 
+    /* Optional configuration */
+    mnet_set_max_connections(app, 100);
+    mnet_set_keep_alive_timeout(app, 30);
+    mnet_set_max_body_size(app, 1024 * 1024); /* 1 MB */
+
     /* HTML pages */
     MNET_GET(app, "/", home_page);
     MNET_GET(app, "/users", users_page);

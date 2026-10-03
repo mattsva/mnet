@@ -85,6 +85,21 @@ Sets a read/write timeout in seconds on client connections. Without this, a slow
 
 The server honors `Connection: keep-alive` from HTTP/1.1 clients and reuses the connection for subsequent requests. Use `mnet_chunked()` for responses where the body length is not known upfront.
 
+### Optional configuration
+
+All configuration options are optional. Call them before `mnet_run()`:
+
+```c
+/* Maximum concurrent connections. 0 = unlimited (default). */
+mnet_set_max_connections(app, 100);
+
+/* Keep-alive idle timeout in seconds. 0 = no timeout (default). */
+mnet_set_keep_alive_timeout(app, 30);
+
+/* Maximum request body size in bytes. 0 = 16 MB (default). */
+mnet_set_max_body_size(app, 1024 * 1024); /* 1 MB */
+```
+
 ### Wildcard routes
 
 Routes ending with `*` match any remaining path. The matched portion is available as a path parameter:

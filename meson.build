@@ -61,3 +61,10 @@ test('mnet_tests', test_mnet)
 install_headers('include/mnet.h', 'include/mnet_app.h', 'include/mnet_request.h',
     'include/mnet_response.h', 'include/mnet_router.h', 'include/mnet_socket.h',
     subdir: 'mnet')
+
+# pkg-config
+import('pkgconfig').generate(mnet_static,
+    name: 'mnet',
+    description: 'A simple, ergonomic web framework for C',
+    version: '0.1.0'
+)

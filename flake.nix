@@ -45,8 +45,8 @@
           echo "  mkdir build && cd build && cmake .. && make && ctest  # CMake"
           echo "  meson setup build && meson compile -C build && meson test -C build  # Meson"
           echo ""
-          echo "After building, set PKG_CONFIG_PATH to use pkg-config:"
-          echo "  export PKG_CONFIG_PATH=$PWD/build:$PKG_CONFIG_PATH"
+          echo "Compile directly (no pkg-config needed):"
+          echo "  gcc -Iinclude example/example_api_server.c build/libmnet.a -o myapp"
         '';
       };
     };

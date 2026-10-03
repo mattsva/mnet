@@ -51,3 +51,7 @@ install(TARGETS mnet_static mnet_shared
     LIBRARY DESTINATION lib
 )
 install(DIRECTORY include/ DESTINATION include)
+
+# pkg-config
+configure_file(mnet.pc.in mnet.pc @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/mnet.pc DESTINATION lib/pkgconfig)

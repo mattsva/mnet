@@ -1,0 +1,116 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build shared library
+        run: |
+          mkdir build && cd build
+          cmake .. -DBUILD_SHARED_LIBS=ON
+          make
+          cp libmnet.so libmnet-linux-x86_64.so
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmnet-linux-x86_64
+          path: build/libmnet-linux-x86_64.so
+
+  build-linux-aarch64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build shared library
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir build && cd build
+          cmake .. -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DBUILD_SHARED_LIBS=ON
+          make
+          cp libmnet.so libmnet-linux-aarch64.so
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmnet-linux-aarch64
+          path: build/libmnet-linux-aarch64.so
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build shared library
+        run: |
+          mkdir build && cd build
+          cmake .. -DBUILD_SHARED_LIBS=ON
+          make
+          cp libmnet.dylib libmnet-macos.dylib
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmnet-macos
+          path: build/libmnet-macos.dylib
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build shared library
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DBUILD_SHARED_LIBS=ON
+          cmake --build . --config Release
+          copy Release\mnet.dll libmnet-windows.dll
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmnet-windows
+          path: build/libmnet-windows.dll
+
+  create-release:
+    needs: [build-linux-x86_64, build-linux-aarch64, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/libmnet-linux-x86_64/libmnet-linux-x86_64.so
+            artifacts/libmnet-linux-aarch64/libmnet-linux-aarch64.so
+            artifacts/libmnet-macos/libmnet-macos.dylib
+            artifacts/libmnet-windows/libmnet-windows.dll
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -83,17 +83,22 @@ jobs:
         run: |
           CFLAGS="-std=c17 -Wall -Wextra -Wpedantic -Werror -g \
                   -fsanitize=address,undefined -fno-omit-frame-pointer \
-                  -D_POSIX_C_SOURCE=200112L -Iinclude -Isrc"
+                  -D_POSIX_C_SOURCE=200112L -Iinclude -Isrc -pthread"
           gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_response.c \
               src/mnet_request.c src/mnet_router.c test/test_mnet.c -o test_mnet_asan
           gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_response.c \
               src/mnet_request.c src/mnet_router.c test/test_http.c -o test_http_asan
+          gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_response.c \
+              src/mnet_request.c src/mnet_router.c test/test_mnet_parser.c -o test_parser_asan
 
       - name: Run unit tests under ASan/UBSan
         run: ASAN_OPTIONS=detect_leaks=1 ./test_mnet_asan
 
       - name: Run HTTP tests under ASan/UBSan
         run: ASAN_OPTIONS=detect_leaks=0 ./test_http_asan
+
+      - name: Run parser and concurrency tests under ASan/UBSan
+        run: ASAN_OPTIONS=detect_leaks=0 ./test_parser_asan
 
   test-valgrind:
     runs-on: ubuntu-latest
@@ -105,10 +110,33 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y valgrind
 
       - name: Build tests
-        run: make test_mnet test_http
+        run: make test_mnet test_http test_parser
 
       - name: Valgrind unit tests
         run: valgrind --leak-check=full --error-exitcode=1 ./test_mnet
 
       - name: Valgrind HTTP tests
         run: valgrind --leak-check=full --error-exitcode=1 --trace-children=yes ./test_http
+
+      - name: Valgrind parser and concurrency tests
+        run: valgrind --leak-check=full --error-exitcode=1 --trace-children=yes ./test_parser
+
+  # The worker pool is the one part of the library that is only exercised with
+  # threads, so run the concurrency tests under ThreadSanitizer too.
+  test-tsan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build with ThreadSanitizer
+        run: |
+          gcc -std=c17 -Wall -Wextra -Wpedantic -Werror -g \
+              -fsanitize=thread -D_POSIX_C_SOURCE=200112L \
+              -Iinclude -Isrc -pthread \
+              src/mnet.c src/mnet_app.c src/mnet_response.c \
+              src/mnet_request.c src/mnet_router.c test/test_mnet_parser.c \
+              -o test_parser_tsan
+
+      - name: Run parser and concurrency tests under TSan
+        run: ./test_parser_tsan

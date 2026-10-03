@@ -18,8 +18,8 @@ jobs:
       - name: Build shared library
         run: |
           mkdir build && cd build
-          cmake .. -DBUILD_SHARED_LIBS=ON
-          make
+          cmake ..
+          make mnet_shared
           cp libmnet.so libmnet-linux-x86_64.so
 
       - name: Upload artifact
@@ -44,8 +44,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
           mkdir build && cd build
-          cmake .. -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DBUILD_SHARED_LIBS=ON
-          make
+          cmake .. -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc
+          make mnet_shared
           cp libmnet.so libmnet-linux-aarch64.so
 
       - name: Upload artifact
@@ -63,8 +63,8 @@ jobs:
       - name: Build shared library
         run: |
           mkdir build && cd build
-          cmake .. -DBUILD_SHARED_LIBS=ON
-          make
+          cmake ..
+          make mnet_shared
           cp libmnet.dylib libmnet-macos.dylib
 
       - name: Upload artifact
@@ -83,9 +83,9 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -DBUILD_SHARED_LIBS=ON
-          cmake --build . --config Release
-          copy Release\mnet.dll libmnet-windows.dll
+          cmake ..
+          cmake --build . --config Release --target mnet_shared
+          copy Release\\mnet.dll libmnet-windows.dll
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

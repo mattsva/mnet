@@ -84,6 +84,11 @@ target_link_libraries(test_http PRIVATE mnet_static)
 target_include_directories(test_http PRIVATE include src test)
 add_test(NAME mnet_http_tests COMMAND test_http)
 
+add_executable(test_parser test/test_mnet_parser.c)
+target_link_libraries(test_parser PRIVATE mnet_static)
+target_include_directories(test_parser PRIVATE include src test)
+add_test(NAME mnet_parser_tests COMMAND test_parser)
+
 # Install
 install(TARGETS mnet_static mnet_shared
     ARCHIVE DESTINATION lib

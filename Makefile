@@ -39,19 +39,23 @@ example/example_combined: $(SRCS) example/example_combined.c
 	$(CC) $(CFLAGS) $(SRCS) $< -o $@
 
 # Run tests (builds + runs)
-test: clean test_mnet test_http
+test: clean test_mnet test_http test_parser
 	./test_mnet
 	./test_http
+	./test_parser
 
 test_mnet: $(SRCS) test/test_mnet.c
-	$(CC) $(CFLAGS) -Itest $(SRCS) test/test_mnet.c -o $@
+	$(CC) $(CFLAGS) -Itest $(SRCS) test/test_mnet.c -o $@ $(LDFLAGS)
 
 test_http: $(SRCS) test/test_http.c
-	$(CC) $(CFLAGS) -Isrc $(SRCS) test/test_http.c -o $@
+	$(CC) $(CFLAGS) -Isrc $(SRCS) test/test_http.c -o $@ $(LDFLAGS)
+
+test_parser: $(SRCS) test/test_mnet_parser.c
+	$(CC) $(CFLAGS) -Isrc $(SRCS) test/test_mnet_parser.c -o $@ $(LDFLAGS)
 
 # Clean
 clean:
-	rm -f mnet-server test_mnet test_http
+	rm -f mnet-server test_mnet test_http test_parser fuzz_http
 	rm -f example/example_http_server
 	rm -f example/example_api_server
 	rm -f example/example_combined

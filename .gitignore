@@ -14,6 +14,8 @@ cmake-build-*/
 # Test binaries
 test_mnet
 test_http
+test_parser
+fuzz_http
 mnet-server
 
 # Example binaries

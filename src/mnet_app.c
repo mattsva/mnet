@@ -8,10 +8,12 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #ifndef _WIN32
 #include <signal.h>
@@ -29,6 +31,7 @@
 #define MNET_MAX_PARAMS 16
 #define MNET_MAX_QUERY 16
 #define MNET_MAX_WORKERS 64
+#define MNET_DEFAULT_WORKERS 4
 #define MNET_DEFAULT_TIMEOUT 30
 #define MNET_LISTEN_BACKLOG 128
 
@@ -49,7 +52,12 @@ struct mnet_app {
     mnet_route_t *routes;
     size_t route_count;
     size_t route_capacity;
-    int running;
+    /*
+     * Set from a signal handler, so it must be a volatile sig_atomic_t: the
+     * C standard only guarantees that type is safe to write from a handler and
+     * read asynchronously elsewhere.
+     */
+    volatile sig_atomic_t running;
     int debug;
     mnet_response_t (*not_found_handler)(mnet_request_t *req);
     mnet_middleware_t middleware;
@@ -172,6 +180,28 @@ static int mnet_add_route(
             r->param_names[param_count] = name;
             param_count++;
             r->param_names[param_count] = NULL;
+        } else if (*p == '*') {
+            /*
+             * A wildcard captures the rest of the path and is exposed under
+             * the name "*", so MNET_PARAM(req, "*") returns it. It must be
+             * registered here or the matcher's slot would have no name to
+             * look up.
+             */
+            char *name = malloc(2);
+            if (name == NULL) goto fail;
+            name[0] = '*';
+            name[1] = '\0';
+
+            const char **tmp = realloc(r->param_names,
+                (param_count + 2) * sizeof(const char *));
+            if (tmp == NULL) { free(name); goto fail; }
+            r->param_names = tmp;
+            r->param_names[param_count] = name;
+            param_count++;
+            r->param_names[param_count] = NULL;
+
+            /* Nothing after the wildcard is matched, so stop scanning. */
+            break;
         } else {
             p++;
         }
@@ -243,21 +273,36 @@ static mnet_route_t *mnet_find_route(
         if (n > 0) {
             *out_count = (size_t)n;
             return r;
-        } else if (n == 0) {
-            /* The attempt may have allocated values before failing. */
-            mnet_match_params_free(out_params, (int)max_params);
+        }
 
-            /* Try exact match next */
+        /*
+         * n == 0 means "no match". mnet_route_match() has already released any
+         * parameter values it allocated before deciding the match failed, so
+         * there is nothing to free here. Freeing again would be a double free
+         * (and would walk max_params slots rather than the real count).
+         */
+        if (n == 0) {
             if (strcmp(r->path, path) == 0) {
                 return r;
             }
             continue;
-        } else {
-            /* n < 0: allocation error */
-            mnet_match_params_free(out_params, (int)max_params);
-            return NULL;
         }
+
+        /* n < 0: allocation error inside the matcher; also already cleaned up. */
+        return NULL;
     }
+
+    /*
+     * HEAD is GET without the body (RFC 9110), so when no HEAD route is
+     * registered it is served by the matching GET route; send_response() then
+     * suppresses the body while keeping the Content-Length. Without this a
+     * HEAD request would 404 on a path that GET serves.
+     */
+    if (method == MNET_HTTP_HEAD) {
+        return mnet_find_route(app, MNET_HTTP_GET, path, out_params,
+            max_params, out_count);
+    }
+
     return NULL;
 }
 
@@ -1201,6 +1246,14 @@ mnet_app_t *mnet_create(void)
     app->timeout_seconds = MNET_DEFAULT_TIMEOUT;
     app->keep_alive_timeout = MNET_DEFAULT_TIMEOUT;
 
+    /*
+     * Threaded by default. A single-threaded blocking server lets one client
+     * that connects and then stalls occupy the whole server, which is the
+     * thing this library most needs to avoid out of the box.
+     * mnet_set_workers(app, 1) selects the single-threaded loop.
+     */
+    app->workers = MNET_DEFAULT_WORKERS;
+
     return app;
 }
 
@@ -1346,7 +1399,10 @@ void mnet_set_timeout(mnet_app_t *app, int seconds)
 void mnet_set_workers(mnet_app_t *app, int workers)
 {
     if (app == NULL) return;
-    if (workers < 0) workers = 0;
+
+    /* 0 restores the threaded default; 1 selects the single-threaded loop. */
+    if (workers == 0) workers = MNET_DEFAULT_WORKERS;
+    if (workers < 0) workers = 1;
     if (workers > MNET_MAX_WORKERS) workers = MNET_MAX_WORKERS;
     app->workers = workers;
 }

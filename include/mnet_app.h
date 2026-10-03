@@ -105,11 +105,13 @@ void mnet_set_timeout(mnet_app_t *app, int seconds);
 /*
  * Number of worker threads.
  *
- * 0 or 1 runs the single-threaded blocking loop (the default, and the only
- * mode on a build without threads). A value above 1 serves that many
- * connections concurrently: the accept loop hands each connection to a worker
- * from a fixed-size pool. Handlers therefore run on several threads at once,
- * so they must not share mutable state without their own synchronisation.
+ * The server is threaded by default (4 workers); this sets the pool size.
+ * Pass 1 to run the single-threaded blocking loop, which has no
+ * synchronisation overhead but handles one connection at a time, or 0 to
+ * restore the default. Values are clamped to a sane range.
+ *
+ * With more than one worker, handlers run concurrently, so any state they
+ * share must be synchronised by the application.
  */
 void mnet_set_workers(mnet_app_t *app, int workers);
 

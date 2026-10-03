@@ -92,6 +92,16 @@ target_link_libraries(test_parser PRIVATE mnet_static)
 target_include_directories(test_parser PRIVATE include src test)
 add_test(NAME mnet_parser_tests COMMAND test_parser)
 
+add_executable(test_stress test/test_stress.c)
+target_link_libraries(test_stress PRIVATE mnet_static)
+target_include_directories(test_stress PRIVATE include src test)
+add_test(NAME mnet_stress_tests COMMAND test_stress)
+
+add_executable(test_features test/test_features.c)
+target_link_libraries(test_features PRIVATE mnet_static)
+target_include_directories(test_features PRIVATE include src test)
+add_test(NAME mnet_feature_tests COMMAND test_features)
+
 # Install
 install(TARGETS mnet_static mnet_shared
     ARCHIVE DESTINATION lib

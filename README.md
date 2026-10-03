@@ -115,10 +115,10 @@ Serves files from `/var/www/files` under the `/static` URL prefix. Path traversa
 mnet_set_workers(app, 4);
 ```
 
-By default the server is single-threaded and handles one connection at a time.
-Setting a worker count above 1 serves that many connections concurrently: the
-accept loop queues each accepted connection and a fixed pool of worker threads
-picks them up. `0` or `1` selects the single-threaded loop.
+The server is threaded by default with 4 workers. Each accepted connection is
+queued and picked up by a fixed pool of worker threads, so multiple clients are
+served concurrently. Pass `1` to `mnet_set_workers()` for the single-threaded
+blocking loop (no synchronisation overhead), or `0` to restore the default.
 
 Handlers then run on several threads at once, so any state they share must be
 synchronised by the application. Route registration is not affected: routes are
@@ -162,7 +162,7 @@ The server honors `Connection: keep-alive` from HTTP/1.1 clients and reuses the 
 All configuration options are optional. Call them before `mnet_run()`:
 
 ```c
-/* Number of worker threads. 0 or 1 = single-threaded (default). */
+/* Number of worker threads. 0 = default (4), 1 = single-threaded. */
 mnet_set_workers(app, 4);
 
 /* Maximum concurrent connections. 0 = unlimited (default). */
@@ -320,7 +320,7 @@ A full-featured example with both HTML pages and a JSON API, including authentic
 make test
 ```
 
-The suite has three parts:
+The suite has five parts:
 
 - `test/test_mnet.c` (43 cases) covers the pure functions: routing, path and
   query parameters, headers, cookies, JSON escaping, URL decoding, the header
@@ -333,9 +333,17 @@ The suite has three parts:
   the worker pool: oversized headers, a single over-long header line, too many
   headers, missing CRLF, malformed request lines and query strings, traversal
   variants, an incomplete body, and several concurrent slow clients.
+- `test/test_stress.c` (5 cases) hammers the server with 32 concurrent clients
+  and 1280 mixed requests, verifies keep-alive, and confirms the default worker
+  pool actually serves requests concurrently rather than serially.
+- `test/test_features.c` (24 cases) is one end-to-end check per documented
+  feature: methods, HEAD, wildcards, middleware, the custom 404 handler,
+  cookies, encoded parameters, response helpers, and the body/header
+  boundaries.
 
-All three run clean under Valgrind and AddressSanitizer, and the same suites run
-in CI against Make, CMake and Meson on Linux, macOS and Windows.
+All five run clean under Valgrind, AddressSanitizer and ThreadSanitizer, and
+the same suites run in CI against Make, CMake and Meson on Linux, macOS and
+Windows.
 
 `test/fuzz_http.c` is a libFuzzer/AFL harness that drives the full request path
 over a socket. Note that because the server runs in a forked child, the fuzzer's
@@ -347,7 +355,7 @@ and sanitizer oracle over the parser rather than a coverage-guided fuzzer.
 | Target | Description |
 |--------|-------------|
 | `make examples` | Build all example binaries |
-| `make test` | Build and run all three test suites |
+| `make test` | Build and run all five test suites |
 | `make clean` | Remove all built binaries |
 | `make help` | Show available targets |
 | `make <name>` | Build `<name>.c` linked with mnet (e.g. `make main`) |
@@ -371,12 +379,13 @@ timeout is applied by default. `mnet_set_timeout(app, seconds)` overrides it (us
 separate idle timeout for reused keep-alive connections. Setting a negative
 timeout disables the protection and is strongly discouraged in production.
 
-**Choose a worker count deliberately.** With the default (single-threaded) one
-connection is handled at a time, so a single slow client occupies the server for
-up to the timeout; use `mnet_set_workers()` to serve several at once. Handlers
-then run concurrently, so anything they share must be synchronised by the
-application. Neither mode protects against a slow request body: the timeout
-bounds how long a client may stall, not how much work it may ask for.
+**Choose a worker count deliberately.** The server is threaded by default (4
+workers), so multiple clients are served concurrently. Handlers then run on
+several threads at once, so anything they share must be synchronised by the
+application. Pass `1` to `mnet_set_workers()` for the single-threaded loop,
+which has no synchronisation overhead but handles one connection at a time.
+Neither mode protects against a slow request body: the timeout bounds how long
+a client may stall, not how much work it may ask for.
 
 **Cap concurrent connections.** `mnet_set_max_connections(app, n)` refuses new
 connections with `503` once `n` are active. Without it there is no limit. Note

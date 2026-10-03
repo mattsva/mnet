@@ -376,6 +376,29 @@ static void test_timeout(void)
     printf("  PASS test_timeout\n");
 }
 
+static void test_debug_per_app(void)
+{
+    mnet_app_t *app = mnet_create();
+    assert(app != NULL);
+
+    mnet_set_debug(app, 1);
+    mnet_set_debug(app, 0);
+
+    mnet_destroy(app);
+    printf("  PASS test_debug_per_app\n");
+}
+
+static void test_static_route_cleanup(void)
+{
+    mnet_app_t *app = mnet_create();
+    assert(app != NULL);
+
+    mnet_static(app, "/static", "/tmp");
+
+    mnet_destroy(app);
+    printf("  PASS test_static_route_cleanup\n");
+}
+
 int main(void)
 {
     printf("Running mnet tests...\n");
@@ -410,6 +433,8 @@ int main(void)
     test_http_method_enum();
     test_middleware();
     test_timeout();
+    test_debug_per_app();
+    test_static_route_cleanup();
 
     printf("\nAll tests passed!\n");
     return 0;

@@ -30,6 +30,7 @@ typedef struct mnet_route {
     /* Extracted parameter names for this route, NULL-terminated */
     const char **param_names;
     void *user_data;
+    int path_allocated;
 } mnet_route_t;
 
 int mnet_route_match(

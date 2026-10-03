@@ -4,20 +4,19 @@
 #include "mnet_request.h"
 #include "mnet_response.h"
 #include "mnet_router.h"
-#include <ctype.h>
 
+#include <ctype.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <fcntl.h>
 #include <unistd.h>
-
-static int app_debug = 0;
 
 #define MNET_INITIAL_ROUTE_CAPACITY 8
 #define MNET_REQUEST_BUFFER_SIZE 8192
@@ -25,6 +24,11 @@ static int app_debug = 0;
 #define MNET_MAX_PARAMS 16
 #define MNET_MAX_HEADERS 32
 #define MNET_MAX_QUERY 16
+
+typedef struct {
+    char *url_prefix;
+    char *fs_path;
+} static_config_t;
 
 struct mnet_app {
     mnet_route_t *routes;
@@ -66,6 +70,7 @@ static int mnet_add_route(
     r->handler = handler;
     r->param_names = NULL;
     r->user_data = NULL;
+    r->path_allocated = 0;
 
     /* Parse parameter names from the pattern */
     size_t param_count = 0;
@@ -105,6 +110,18 @@ static void free_route(mnet_route_t *r)
         }
         free(r->param_names);
         r->param_names = NULL;
+    }
+    if (r->path_allocated) {
+        free((void *)r->path);
+        r->path = NULL;
+        r->path_allocated = 0;
+    }
+    if (r->user_data) {
+        static_config_t *cfg = (static_config_t *)r->user_data;
+        free(cfg->url_prefix);
+        free(cfg->fs_path);
+        free(cfg);
+        r->user_data = NULL;
     }
 }
 
@@ -515,9 +532,9 @@ static void send_response(mnet_socket_t client, const mnet_response_t *r,
     }
 }
 
-static void send_not_found(mnet_socket_t client, const char *path)
+static void send_not_found(mnet_socket_t client, const char *path, int debug)
 {
-    if (app_debug) {
+    if (debug) {
         fprintf(stderr, "[mnet] 404  %s %s\n", "GET", path);
     }
     const char body[] =
@@ -541,9 +558,9 @@ static void send_not_found(mnet_socket_t client, const char *path)
     }
 }
 
-static void send_method_not_allowed(mnet_socket_t client, const char *method)
+static void send_method_not_allowed(mnet_socket_t client, const char *method, int debug)
 {
-    if (app_debug) {
+    if (debug) {
         fprintf(stderr, "[mnet] 405  %s\n", method);
     }
     const char body[] =
@@ -719,7 +736,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 
     parsed_request_t parsed;
     if (parse_request(client, buffer, received, &parsed) != 0) {
-        send_method_not_allowed(client, parsed.method);
+        send_method_not_allowed(client, parsed.method, app->debug);
         return;
     }
 
@@ -732,9 +749,9 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
     mnet_response_t response = dispatch(app, &parsed, param_values, param_count);
 
     if (response.status == 0 && app->not_found_handler == NULL) {
-        send_not_found(client, parsed.path_only);
+        send_not_found(client, parsed.path_only, app->debug);
     } else {
-        if (app_debug) {
+        if (app->debug) {
             fprintf(stderr, "[mnet] %d %s %s\n",
                 response.status, parsed.method, parsed.path_only);
         }
@@ -774,8 +791,7 @@ void mnet_destroy(mnet_app_t *app)
 
 void mnet_set_debug(mnet_app_t *app, int enabled)
 {
-    (void)app;
-    app_debug = enabled;
+    if (app != NULL) app->debug = enabled;
 }
 
 void mnet_set_not_found_handler(mnet_app_t *app, mnet_response_t (*handler)(mnet_request_t *req))
@@ -787,11 +803,6 @@ void mnet_use(mnet_app_t *app, mnet_middleware_t middleware)
 {
     if (app != NULL) app->middleware = middleware;
 }
-
-typedef struct {
-    char *url_prefix;
-    char *fs_path;
-} static_config_t;
 
 static const char *mime_type(const char *path)
 {
@@ -885,6 +896,19 @@ void mnet_static(mnet_app_t *app, const char *url_prefix,
 {
     if (app == NULL || url_prefix == NULL || fs_path == NULL) return;
 
+    if (app->route_count == app->route_capacity) {
+        size_t nc;
+        if (app->route_capacity == 0) {
+            nc = MNET_INITIAL_ROUTE_CAPACITY;
+        } else {
+            nc = app->route_capacity * 2;
+        }
+        mnet_route_t *nr = realloc(app->routes, nc * sizeof(*nr));
+        if (nr == NULL) return;
+        app->routes = nr;
+        app->route_capacity = nc;
+    }
+
     static_config_t *cfg = malloc(sizeof(static_config_t));
     if (cfg == NULL) return;
     cfg->url_prefix = strdup(url_prefix);
@@ -906,6 +930,7 @@ void mnet_static(mnet_app_t *app, const char *url_prefix,
     r->param_names = NULL;
     r->legacy_handler = NULL;
     r->user_data = cfg;
+    r->path_allocated = 1;
 
     app->route_count++;
 }

@@ -27,6 +27,9 @@ example/example_combined
 *.swo
 *~
 
+# User-compiled binaries
+myapp
+
 # OS
 .DS_Store
 Thumbs.db

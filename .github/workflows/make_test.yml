@@ -50,3 +50,23 @@ jobs:
 
       - name: Run tests with Meson
         run: meson test -C build --print-errorlogs
+
+  # Catch platform-specific breakage (missing headers, POSIX-only APIs,
+  # non-portable socket/file code) before it reaches a release tag.
+  test-platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build and test with CMake
+        shell: bash
+        run: |
+          mkdir build && cd build
+          cmake ..
+          cmake --build . --config Release
+          ctest --output-on-failure -C Release

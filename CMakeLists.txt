@@ -3,7 +3,9 @@ project(mnet VERSION 0.1.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-add_compile_definitions(_POSIX_C_SOURCE=200112L)
+if(NOT WIN32)
+    add_compile_definitions(_POSIX_C_SOURCE=200112L)
+endif()
 if(APPLE)
     add_compile_definitions(_DARWIN_C_SOURCE)
 endif()
@@ -30,8 +32,11 @@ set_target_properties(mnet_shared PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION 1
 )
+
+# Winsock is required by every target that links mnet on Windows.
 if(WIN32)
-    target_link_libraries(mnet_shared ws2_32)
+    target_link_libraries(mnet_static PUBLIC ws2_32)
+    target_link_libraries(mnet_shared PRIVATE ws2_32)
 endif()
 
 # Examples

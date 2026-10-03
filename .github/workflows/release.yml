@@ -65,7 +65,7 @@ jobs:
           mkdir build && cd build
           cmake ..
           make mnet_shared
-          cp libmnet.0.1.0.dylib libmnet-macos.dylib
+          cp "$(ls libmnet*.dylib | head -1)" libmnet-macos.dylib
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -86,7 +86,7 @@ jobs:
           cd build
           cmake ..
           cmake --build . --config Release --target mnet_shared
-          cp mnet.dll libmnet-windows.dll
+          cp "$(find . -name 'mnet.dll' | head -1)" libmnet-windows.dll
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

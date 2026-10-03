@@ -953,17 +953,17 @@ static mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
 
 static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 {
-    int timeout = app->timeout_seconds > 0 ?
-        app->timeout_seconds : MNET_DEFAULT_TIMEOUT;
-    mnet_set_socket_timeout(client, timeout);
+    /* A negative timeout means "disabled"; otherwise the configured value is
+       already a positive default, so no fallback is needed here. */
+    if (app->timeout_seconds > 0) {
+        mnet_set_socket_timeout(client, app->timeout_seconds);
+    }
 
     int keep_alive = 0;
     do {
-        if (keep_alive) {
+        if (keep_alive && app->keep_alive_timeout > 0) {
             /* Idle wait for the next request on a reused connection. */
-            int ka = app->keep_alive_timeout > 0 ?
-                app->keep_alive_timeout : MNET_DEFAULT_TIMEOUT;
-            mnet_set_socket_timeout(client, ka);
+            mnet_set_socket_timeout(client, app->keep_alive_timeout);
         }
 
         char buffer[MNET_REQUEST_BUFFER_SIZE];
@@ -1189,6 +1189,18 @@ static void mnet_pool_shutdown(mnet_pool_t *pool)
 mnet_app_t *mnet_create(void)
 {
     mnet_app_t *app = calloc(1, sizeof(mnet_app_t));
+
+    if (app == NULL) return NULL;
+
+    /*
+     * Set the security-relevant defaults explicitly rather than relying on the
+     * "0 means default" convention everywhere. A bounded timeout is what keeps
+     * a client that connects and sends nothing from pinning the server, so it
+     * is on from the start. mnet_set_timeout(app, 0) restores this value.
+     */
+    app->timeout_seconds = MNET_DEFAULT_TIMEOUT;
+    app->keep_alive_timeout = MNET_DEFAULT_TIMEOUT;
+
     return app;
 }
 
@@ -1324,7 +1336,11 @@ static mnet_response_t static_handler(mnet_request_t *req)
 
 void mnet_set_timeout(mnet_app_t *app, int seconds)
 {
-    if (app != NULL) app->timeout_seconds = seconds;
+    if (app == NULL) return;
+
+    /* 0 restores the bounded default; a negative value disables the timeout
+       entirely, which the documentation discourages for production. */
+    app->timeout_seconds = (seconds == 0) ? MNET_DEFAULT_TIMEOUT : seconds;
 }
 
 void mnet_set_workers(mnet_app_t *app, int workers)
@@ -1348,7 +1364,8 @@ void mnet_set_max_connections(mnet_app_t *app, int max_connections)
 
 void mnet_set_keep_alive_timeout(mnet_app_t *app, int seconds)
 {
-    if (app != NULL) app->keep_alive_timeout = seconds;
+    if (app == NULL) return;
+    app->keep_alive_timeout = (seconds == 0) ? MNET_DEFAULT_TIMEOUT : seconds;
 }
 
 void mnet_set_max_body_size(mnet_app_t *app, size_t max_body_size)

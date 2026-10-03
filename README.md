@@ -109,6 +109,38 @@ mnet_static(app, "/static", "/var/www/files");
 
 Serves files from `/var/www/files` under the `/static` URL prefix. Path traversal is prevented via `realpath` checks. Common MIME types are detected from file extensions.
 
+### Concurrency
+
+```c
+mnet_set_workers(app, 4);
+```
+
+By default the server is single-threaded and handles one connection at a time.
+Setting a worker count above 1 serves that many connections concurrently: the
+accept loop queues each accepted connection and a fixed pool of worker threads
+picks them up. `0` or `1` selects the single-threaded loop.
+
+Handlers then run on several threads at once, so any state they share must be
+synchronised by the application. Route registration is not affected: routes are
+read-only once `mnet_run()` starts.
+
+### Logging
+
+```c
+static void my_log(int level, const char *fmt, ...)
+{
+    /* ... */
+}
+
+mnet_set_log_handler(app, my_log);
+```
+
+Messages are reported through the handler if one is set, otherwise to `stderr`.
+Levels are `MNET_LOG_ERROR`, `MNET_LOG_WARN`, `MNET_LOG_INFO` and
+`MNET_LOG_DEBUG`. Rejected requests (oversized headers, unsupported methods,
+malformed request lines, path traversal, connection-limit refusals) and
+listener failures are all reported.
+
 ### Socket timeouts
 
 ```c
@@ -118,7 +150,8 @@ mnet_set_timeout(app, 30);
 Sets a read/write timeout in seconds on client connections. Without this, a slow
 or malicious client can hang the server indefinitely. A 30 second timeout is
 applied by default even if this is never called; pass a value to override it, or
-`0` to fall back to the default.
+`0` to fall back to the default. A negative value disables the timeout, which is
+strongly discouraged in production.
 
 ### Keep-alive connections
 
@@ -129,10 +162,13 @@ The server honors `Connection: keep-alive` from HTTP/1.1 clients and reuses the 
 All configuration options are optional. Call them before `mnet_run()`:
 
 ```c
+/* Number of worker threads. 0 or 1 = single-threaded (default). */
+mnet_set_workers(app, 4);
+
 /* Maximum concurrent connections. 0 = unlimited (default). */
 mnet_set_max_connections(app, 100);
 
-/* Keep-alive idle timeout in seconds. 0 = no timeout (default). */
+/* Keep-alive idle timeout in seconds. 0 = 30 s default. */
 mnet_set_keep_alive_timeout(app, 30);
 
 /* Maximum request body size in bytes. 0 = 16 MB (default). */
@@ -284,22 +320,34 @@ A full-featured example with both HTML pages and a JSON API, including authentic
 make test
 ```
 
-The suite has two parts. `test/test_mnet.c` (43 cases) covers the pure
-functions: routing, path and query parameters, headers, cookies, JSON escaping,
-URL decoding, the header validators, chunked responses, response-free paths and
-the configuration limits. `test/test_http.c` (13 cases) drives the real server
-over a loopback socket, covering request parsing, method validation, body
-bounds, header limits and static-file handling including traversal attempts.
+The suite has three parts:
 
-Both run clean under Valgrind and AddressSanitizer. The same suites run in CI
-against Make, CMake, and Meson, on Linux, macOS, and Windows.
+- `test/test_mnet.c` (43 cases) covers the pure functions: routing, path and
+  query parameters, headers, cookies, JSON escaping, URL decoding, the header
+  validators, chunked responses, response-free paths and the configuration
+  limits.
+- `test/test_http.c` (13 cases) drives the real server over a loopback socket:
+  request parsing, method validation, body bounds, header limits and static-file
+  handling including traversal attempts.
+- `test/test_mnet_parser.c` (17 cases) targets the parser's failure modes and
+  the worker pool: oversized headers, a single over-long header line, too many
+  headers, missing CRLF, malformed request lines and query strings, traversal
+  variants, an incomplete body, and several concurrent slow clients.
+
+All three run clean under Valgrind and AddressSanitizer, and the same suites run
+in CI against Make, CMake and Meson on Linux, macOS and Windows.
+
+`test/fuzz_http.c` is a libFuzzer/AFL harness that drives the full request path
+over a socket. Note that because the server runs in a forked child, the fuzzer's
+coverage instrumentation only observes the client side, so it acts as a crash
+and sanitizer oracle over the parser rather than a coverage-guided fuzzer.
 
 ## Makefile targets
 
 | Target | Description |
 |--------|-------------|
 | `make examples` | Build all example binaries |
-| `make test` | Build and run the test suite |
+| `make test` | Build and run all three test suites |
 | `make clean` | Remove all built binaries |
 | `make help` | Show available targets |
 | `make <name>` | Build `<name>.c` linked with mnet (e.g. `make main`) |
@@ -308,24 +356,32 @@ against Make, CMake, and Meson, on Linux, macOS, and Windows.
 
 - A C17 compiler (GCC, Clang, or MSVC)
 - Linux, macOS, BSD, or Windows
-- No external dependencies
+- Threads: pthreads on POSIX, the Win32 thread API on Windows
+- No other external dependencies
 
 ## Security considerations
 
 mnet is a small framework and leaves several operational concerns to the caller.
 If you expose a server to a network you do not fully trust, read this section.
 
-**Timeouts have a default.** I/O is blocking and the server is single-threaded:
-it handles one connection at a time. A client that connects and then sends
-nothing would otherwise hold the server indefinitely, so a 30 second timeout is
-applied by default. `mnet_set_timeout(app, seconds)` overrides it (use `0` to
-get the default back), and `mnet_set_keep_alive_timeout()` sets the separate idle
-timeout for reused keep-alive connections.
+**Timeouts have a default.** I/O is blocking, so a client that connects and then
+sends nothing would otherwise hold its connection indefinitely. A 30 second
+timeout is applied by default. `mnet_set_timeout(app, seconds)` overrides it (use
+`0` to get the default back), and `mnet_set_keep_alive_timeout()` sets the
+separate idle timeout for reused keep-alive connections. Setting a negative
+timeout disables the protection and is strongly discouraged in production.
 
-**Cap concurrent connections.** `mnet_set_max_connections(app, n)` rejects new
-connections once `n` are active. Without it there is no limit. Note that this is a
-simple counter, not per-IP rate limiting — it does not distinguish one abusive
-client from many legitimate ones.
+**Choose a worker count deliberately.** With the default (single-threaded) one
+connection is handled at a time, so a single slow client occupies the server for
+up to the timeout; use `mnet_set_workers()` to serve several at once. Handlers
+then run concurrently, so anything they share must be synchronised by the
+application. Neither mode protects against a slow request body: the timeout
+bounds how long a client may stall, not how much work it may ask for.
+
+**Cap concurrent connections.** `mnet_set_max_connections(app, n)` refuses new
+connections with `503` once `n` are active. Without it there is no limit. Note
+that this is a simple counter, not per-IP rate limiting — it does not distinguish
+one abusive client from many legitimate ones.
 
 **There is no TLS.** mnet speaks plaintext HTTP. Terminate TLS in a reverse proxy
 (nginx, Caddy, stunnel) in front of it if you need HTTPS.
@@ -333,8 +389,11 @@ client from many legitimate ones.
 **Header size is bounded.** The request line and headers must fit in the 8 KB read
 buffer. A request whose headers do not fit is rejected with `431` and the
 connection is closed; headers are never silently truncated, and a header block
-larger than the buffer is not parsed as if it were complete. The number of
-headers is capped at 100. These limits are fixed rather than configurable.
+larger than the buffer is not parsed as if it were complete. Individual header
+lines are capped at 4 KB and the header count at 100; a line whose name is not a
+valid RFC 7230 token is skipped rather than stored. Query parameter names and
+values are capped at 1 KB each, and a request exceeding either cap is rejected
+rather than truncated. These limits are fixed rather than configurable.
 
 **Body size is capped.** Request bodies are limited to 16 MB by default and
 rejected above that with `413`; adjust with `mnet_set_max_body_size()`. A
@@ -360,10 +419,12 @@ root is `/var/www`) is not reachable. Symlinks are resolved before the check, so
 a symlink that leaves the root is rejected too. Do not serve a directory whose
 contents you would not expose.
 
-**URL decoding is strict.** `mnet_url_decode_ex()` rejects malformed or truncated
-percent escapes and `%00` instead of truncating, and never writes past the
-destination capacity. Path parameters and query values that fail to decode are
-reported as empty rather than partially decoded.
+**URL decoding is strict.** `mnet_url_decode_ex()` (and its convenience wrapper
+`mnet_url_decode_safe()`) rejects malformed or truncated percent escapes and
+`%00` instead of truncating, and never writes past the destination capacity. Path
+parameters and query values that fail to decode are reported as empty rather than
+partially decoded.
 
-**Handlers run on a single thread.** Do not block inside a handler — a slow
-handler stalls every other client.
+**Handlers must not block.** A slow handler occupies its worker for as long as it
+runs. With one worker that stalls every other client; with several it still ties
+up a slot.

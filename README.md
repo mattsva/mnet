@@ -283,6 +283,6 @@ make test
 
 ## Requirements
 
-- GCC with C17 support
-- POSIX system (Linux, macOS, BSD)
+- A C17 compiler (GCC, Clang, or MSVC)
+- Linux, macOS, BSD, or Windows
 - No external dependencies

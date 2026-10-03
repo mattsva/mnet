@@ -180,7 +180,11 @@ const char *body = MNET_BODY(req);
 size_t body_len = MNET_BODY_LEN(req);
 ```
 
-The framework reads the full request body based on the `Content-Length` header. Bodies larger than 16 MB are rejected.
+The request line and headers are parsed from an 8 KB read buffer, so they must fit
+within it. The body is not limited by that buffer: it is read in full into a heap
+buffer sized from the `Content-Length` header, up to a configurable cap (16 MB by
+default, see `mnet_set_max_body_size()`). Requests declaring a larger body are
+rejected.
 
 ### Response helpers
 
@@ -194,12 +198,18 @@ return mnet_status(201, "created");        // custom status + text body
 return mnet_chunked(200, "text/html", html, html_len); // chunked transfer
 ```
 
-All response helpers allocate the body with `malloc`. The server frees it automatically after sending. If you create responses outside of request handling (e.g., for testing), free them with:
+All response helpers allocate the body with `malloc`. During request handling the
+server frees the body automatically after sending the response, so handlers do
+**not** need to free anything they return. You only need to free manually when you
+build a response outside request handling (for example in a test):
 
 ```c
 mnet_response_t r = mnet_text("hello");
 mnet_response_free(&r);
 ```
+
+`mnet_response_free()` is safe to call on a `NULL` pointer or an already-freed
+response, and it is a no-op for chunked responses (which do not own their body).
 
 ### Path parameters
 
@@ -271,6 +281,15 @@ A full-featured example with both HTML pages and a JSON API, including authentic
 make test
 ```
 
+The suite is a single self-contained harness in `test/test_mnet.c` (38 cases) and
+covers routing, path and query parameters, headers, cookies, body parsing, JSON
+escaping, chunked responses, response-free paths, and the configuration limits.
+It runs clean under Valgrind. It does not currently drive a real socket end to
+end, so HTTP-level integration behaviour is not covered.
+
+The same suite runs in CI against Make, CMake, and Meson, on Linux, macOS, and
+Windows.
+
 ## Makefile targets
 
 | Target | Description |
@@ -286,3 +305,38 @@ make test
 - A C17 compiler (GCC, Clang, or MSVC)
 - Linux, macOS, BSD, or Windows
 - No external dependencies
+
+## Security considerations
+
+mnet is a small framework and leaves several operational concerns to the caller.
+If you expose a server to a network you do not fully trust, read this section.
+
+**Set a timeout.** I/O is blocking and the server is single-threaded: it handles
+one connection at a time. A client that connects and then sends nothing holds the
+server for as long as the socket stays open. Call `mnet_set_timeout(app, seconds)`
+to bound that. There is no timeout by default.
+
+**Cap concurrent connections.** `mnet_set_max_connections(app, n)` rejects new
+connections once `n` are active. Without it there is no limit. Note that this is a
+simple counter, not per-IP rate limiting — it does not distinguish one abusive
+client from many legitimate ones.
+
+**There is no TLS.** mnet speaks plaintext HTTP. Terminate TLS in a reverse proxy
+(nginx, Caddy, stunnel) in front of it if you need HTTPS.
+
+**Header size is bounded by the read buffer.** The request line and headers must
+fit in the 8 KB read buffer. A request whose headers exceed it fails to parse and
+the connection is closed. This is an implicit limit, not a configurable one; keep
+that in mind if you expect very large cookies or a long list of headers.
+
+**Body size is capped.** Request bodies are limited to 16 MB by default and
+rejected above that; adjust with `mnet_set_max_body_size()`. Bodies are allocated
+on the heap, so the cap also bounds per-request memory use.
+
+**Static file serving is traversal-checked.** `mnet_static()` resolves the
+requested path with `realpath()` and verifies it stays under the configured root,
+rejecting escapes with 403. Do not serve a directory whose contents you would not
+expose.
+
+**Handlers run on a single thread.** Do not block inside a handler — a slow
+handler stalls every other client.

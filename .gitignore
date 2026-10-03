@@ -1,0 +1,32 @@
+# Build artifacts
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# Build directories
+build/
+_build/
+cmake-build-*/
+
+# Test binaries
+test_mnet
+mnet-server
+
+# Example binaries
+example/example_http_server
+example/example_api_server
+example/example_combined
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

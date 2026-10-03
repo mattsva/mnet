@@ -1,8 +1,17 @@
 CC      = gcc
 CFLAGS  = -std=c17 -Wall -Wextra -Wpedantic -Werror \
           -D_POSIX_C_SOURCE=200112L -Iinclude
+LDFLAGS =
 ifeq ($(shell uname -s),Darwin)
     CFLAGS += -D_DARWIN_C_SOURCE
+endif
+
+# The worker pool needs pthreads on POSIX.
+ifeq ($(OS),Windows_NT)
+    LDFLAGS += -lws2_32
+else
+    LDFLAGS += -pthread
+    CFLAGS  += -pthread
 endif
 
 # Source files

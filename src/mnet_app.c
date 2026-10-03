@@ -22,10 +22,15 @@
 #define MNET_REQUEST_BUFFER_SIZE 8192
 #define MNET_MAX_HEADER_BYTES MNET_REQUEST_BUFFER_SIZE
 #define MNET_MAX_HEADERS 100
+#define MNET_MAX_HEADER_LINE 4096
+#define MNET_MAX_QUERY_NAME 1024
+#define MNET_MAX_QUERY_VALUE 1024
 #define MNET_MAX_BODY_SIZE (16 * 1024 * 1024)
 #define MNET_MAX_PARAMS 16
 #define MNET_MAX_QUERY 16
+#define MNET_MAX_WORKERS 64
 #define MNET_DEFAULT_TIMEOUT 30
+#define MNET_LISTEN_BACKLOG 128
 
 /* Parse/validation outcomes, surfaced to the client as an HTTP status. */
 #define MNET_PARSE_OK 0
@@ -37,6 +42,7 @@
 typedef struct {
     char *url_prefix;
     char *fs_path;
+    mnet_app_t *app; /* for logging; not owned */
 } static_config_t;
 
 struct mnet_app {
@@ -51,7 +57,67 @@ struct mnet_app {
     int max_connections;
     int keep_alive_timeout;
     size_t max_body_size;
+    mnet_log_handler_t log_handler;
+    int workers;
+    int active_connections; /* guarded by the pool mutex */
 };
+
+/*
+ * Process-wide log handler.
+ *
+ * The handler is set per app but messages can be emitted before an app exists
+ * (listener setup) and from worker threads, so a single process-wide pointer
+ * is kept as well. It is written before any worker starts and only read
+ * afterwards, so no locking is needed.
+ */
+static mnet_log_handler_t g_log_handler = NULL;
+
+void mnet_log_msg(int level, const char *fmt, ...)
+{
+    va_list args;
+
+    if (g_log_handler != NULL) {
+        char buf[1024];
+
+        va_start(args, fmt);
+        vsnprintf(buf, sizeof(buf), fmt, args);
+        va_end(args);
+        g_log_handler(level, "%s", buf);
+        return;
+    }
+
+    const char *tag = "INFO";
+    switch (level) {
+        case MNET_LOG_ERROR: tag = "ERROR"; break;
+        case MNET_LOG_WARN:  tag = "WARN";  break;
+        case MNET_LOG_INFO:  tag = "INFO";  break;
+        case MNET_LOG_DEBUG: tag = "DEBUG"; break;
+        default: break;
+    }
+
+    va_start(args, fmt);
+    fprintf(stderr, "[mnet] %s: ", tag);
+    vfprintf(stderr, fmt, args);
+    fputc('\n', stderr);
+    va_end(args);
+}
+
+static void mnet_app_log(mnet_app_t *app, int level, const char *fmt, ...)
+{
+    va_list args;
+    char buf[1024];
+
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    if (app != NULL && app->log_handler != NULL) {
+        app->log_handler(level, "%s", buf);
+        return;
+    }
+    mnet_log_msg(level, "%s", buf);
+}
+
 static int mnet_add_route(
     mnet_app_t *app,
     mnet_http_method_t method,
@@ -265,6 +331,22 @@ static int parse_query_string(const char *qs,
             *out_names = NULL; *out_values = NULL; *out_count = 0;
             return -1;
         }
+
+        /* A single parameter name or value is capped; a longer one is rejected
+           rather than silently stored or truncated. */
+        if (strlen(names[idx]) > MNET_MAX_QUERY_NAME ||
+            strlen(values[idx]) > MNET_MAX_QUERY_VALUE) {
+            free(names[idx]); free(values[idx]);
+            for (size_t j = 0; j < idx; j++) {
+                free(names[j]); free(values[j]);
+            }
+            free(names); free(values); free(copy);
+            *out_names = NULL; *out_values = NULL; *out_count = 0;
+            return -1;
+        }
+
+        /* Decode in place. The decoded form is never longer than the source,
+           so the existing allocation is always large enough. */
         mnet_url_decode(names[idx], strlen(names[idx]) + 1, names[idx]);
         mnet_url_decode(values[idx], strlen(values[idx]) + 1, values[idx]);
         idx++;
@@ -309,11 +391,23 @@ static int parse_headers(const char *headers_raw,
         /* Hard cap on header count: refuse to grow beyond it. */
         if (count >= MNET_MAX_HEADERS) goto fail;
 
+        /* Reject an individual header line that is unreasonably long rather
+           than letting one line consume the whole budget. */
+        if (strlen(line) >= MNET_MAX_HEADER_LINE) goto fail;
+
         char *colon = strchr(line, ':');
         if (colon) {
             *colon = '\0';
             const char *v = colon + 1;
             while (*v == ' ' || *v == '\t') v++;
+
+            /* The name must be a valid token; a line without a valid name is
+               not a header and is skipped rather than stored. */
+            if (!mnet_header_name_valid(line)) {
+                line = strtok_r(NULL, "\r\n", &save);
+                continue;
+            }
+
             names[count] = strdup(line);
             values[count] = strdup(v);
             if (names[count] == NULL || values[count] == NULL) {
@@ -582,6 +676,7 @@ static void send_response(mnet_socket_t client, const mnet_response_t *r,
         case 413: status_text = "Payload Too Large"; break;
         case 431: status_text = "Request Header Fields Too Large"; break;
         case 500: status_text = "Internal Server Error"; break;
+        case 503: status_text = "Service Unavailable"; break;
         default: status_text = "Unknown"; break;
     }
 
@@ -768,7 +863,7 @@ static int parse_request(mnet_socket_t client, const char *buffer,
         const char *hdr_section = line_end + 1;
         if (parse_headers(hdr_section, &out->extras.header_names,
                 &out->extras.header_values, &out->extras.header_count) != 0) {
-            return MNET_PARSE_TOO_LARGE;
+            return MNET_PARSE_HEADERS_TOO_LARGE;
         }
 
         for (size_t i = 0; i < out->extras.header_count; i++) {
@@ -895,6 +990,9 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
             if (used >= sizeof(buffer) - 1) too_large = 1;
             /* Otherwise the client closed or timed out: nothing to answer. */
             if (too_large) {
+                mnet_app_log(app, MNET_LOG_WARN,
+                    "rejected request: header block exceeds %d bytes",
+                    (int)(sizeof(buffer) - 1));
                 send_simple_error(client, 431, "Request Header Fields Too Large",
                     "Request headers exceed the maximum size.", app->debug);
             }
@@ -908,11 +1006,22 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 
         if (pr != MNET_PARSE_OK) {
             if (pr == MNET_PARSE_UNSUPPORTED_METHOD) {
+                mnet_app_log(app, MNET_LOG_WARN,
+                    "rejected request: unsupported method '%s'", parsed.method);
                 send_method_not_allowed(client, parsed.method, app->debug, 0);
             } else if (pr == MNET_PARSE_TOO_LARGE) {
+                mnet_app_log(app, MNET_LOG_WARN,
+                    "rejected request: body exceeds the configured limit");
                 send_simple_error(client, 413, "Payload Too Large",
                     "Request body exceeds the maximum size.", app->debug);
+            } else if (pr == MNET_PARSE_HEADERS_TOO_LARGE) {
+                mnet_app_log(app, MNET_LOG_WARN,
+                    "rejected request: header count or line length exceeds the limit");
+                send_simple_error(client, 431, "Request Header Fields Too Large",
+                    "Request headers exceed the maximum size.", app->debug);
             } else {
+                mnet_app_log(app, MNET_LOG_WARN,
+                    "rejected request: could not parse the request line");
                 send_simple_error(client, 400, "Bad Request",
                     "The request could not be parsed.", app->debug);
             }
@@ -948,7 +1057,6 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 }
 
 static mnet_app_t *g_running_app = NULL;
-static volatile int g_active_connections = 0;
 
 static void sig_handler(int signum)
 {
@@ -956,6 +1064,126 @@ static void sig_handler(int signum)
     if (g_running_app) {
         g_running_app->running = 0;
     }
+}
+
+/*
+ * Worker pool.
+ *
+ * The accept loop pushes each accepted connection onto a bounded queue; the
+ * workers pop one, serve it to completion (including keep-alive requests) and
+ * loop. All shared state is guarded by the mutex: the queue itself, the
+ * connection counter used to enforce max_connections, and the shutdown flag.
+ *
+ * app->routes and the handler table are only read once the pool is running, so
+ * they need no locking: they are fully populated before mnet_run() is called
+ * and the application is not expected to register routes afterwards.
+ */
+typedef struct {
+    mnet_socket_t *slots;
+    size_t capacity;
+    size_t head;
+    size_t count;
+    int shutting_down;
+    mnet_app_t *app;
+
+    mnet_mutex_t mutex;
+    mnet_cond_t not_empty;
+    mnet_cond_t not_full;
+    mnet_thread_t *threads;
+    size_t thread_count;
+} mnet_pool_t;
+
+static int mnet_pool_push(mnet_pool_t *pool, mnet_socket_t client)
+{
+    mnet_mutex_lock(&pool->mutex);
+
+    while (pool->count == pool->capacity && !pool->shutting_down) {
+        /* The queue is full: wait for a worker to free a slot. If the server
+           is stopping, stop accepting instead. */
+        if (!pool->app->running) {
+            pool->shutting_down = 1;
+            break;
+        }
+        mnet_cond_wait(&pool->not_full, &pool->mutex);
+    }
+
+    if (pool->shutting_down) {
+        mnet_mutex_unlock(&pool->mutex);
+        return -1;
+    }
+
+    pool->slots[(pool->head + pool->count) % pool->capacity] = client;
+    pool->count++;
+    mnet_cond_signal(&pool->not_empty);
+    mnet_mutex_unlock(&pool->mutex);
+    return 0;
+}
+
+static int mnet_pool_pop(mnet_pool_t *pool, mnet_socket_t *out)
+{
+    mnet_mutex_lock(&pool->mutex);
+
+    while (pool->count == 0 && !pool->shutting_down) {
+        mnet_cond_wait(&pool->not_empty, &pool->mutex);
+    }
+
+    if (pool->count == 0) {
+        mnet_mutex_unlock(&pool->mutex);
+        return -1;
+    }
+
+    *out = pool->slots[pool->head];
+    pool->head = (pool->head + 1) % pool->capacity;
+    pool->count--;
+    mnet_cond_signal(&pool->not_full);
+    mnet_mutex_unlock(&pool->mutex);
+    return 0;
+}
+
+MNET_THREAD_FN(mnet_worker_main)
+{
+    mnet_pool_t *pool = (mnet_pool_t *)arg;
+    mnet_socket_t client;
+
+    while (mnet_pool_pop(pool, &client) == 0) {
+        mnet_handle_client(pool->app, client);
+        mnet_close(client);
+
+        mnet_mutex_lock(&pool->mutex);
+        pool->app->active_connections--;
+        mnet_mutex_unlock(&pool->mutex);
+    }
+
+    MNET_THREAD_RETURN;
+}
+
+static void mnet_pool_shutdown(mnet_pool_t *pool)
+{
+    mnet_mutex_lock(&pool->mutex);
+    pool->shutting_down = 1;
+    mnet_cond_broadcast(&pool->not_empty);
+    mnet_cond_broadcast(&pool->not_full);
+    mnet_mutex_unlock(&pool->mutex);
+
+    for (size_t i = 0; i < pool->thread_count; i++) {
+        mnet_thread_join(pool->threads[i]);
+    }
+    free(pool->threads);
+    pool->threads = NULL;
+
+    /* Drain anything still queued: no worker will pick it up now. */
+    while (pool->count > 0) {
+        mnet_socket_t c = pool->slots[pool->head];
+        pool->head = (pool->head + 1) % pool->capacity;
+        pool->count--;
+        mnet_close(c);
+    }
+    free(pool->slots);
+    pool->slots = NULL;
+
+    mnet_mutex_destroy(&pool->mutex);
+    mnet_cond_destroy(&pool->not_empty);
+    mnet_cond_destroy(&pool->not_full);
 }
 
 mnet_app_t *mnet_create(void)
@@ -1044,6 +1272,9 @@ static mnet_response_t static_handler(mnet_request_t *req)
                   base_real[base_len - 1] == '/');
 
     if (!inside) {
+        mnet_app_log(cfg->app, MNET_LOG_WARN,
+            "blocked path traversal attempt: '%s' resolves outside the root",
+            req->path);
         free(real);
         free(base_real);
         return mnet_error(403, "forbidden");
@@ -1094,6 +1325,20 @@ static mnet_response_t static_handler(mnet_request_t *req)
 void mnet_set_timeout(mnet_app_t *app, int seconds)
 {
     if (app != NULL) app->timeout_seconds = seconds;
+}
+
+void mnet_set_workers(mnet_app_t *app, int workers)
+{
+    if (app == NULL) return;
+    if (workers < 0) workers = 0;
+    if (workers > MNET_MAX_WORKERS) workers = MNET_MAX_WORKERS;
+    app->workers = workers;
+}
+
+void mnet_set_log_handler(mnet_app_t *app, mnet_log_handler_t handler)
+{
+    g_log_handler = handler;
+    if (app != NULL) app->log_handler = handler;
 }
 
 void mnet_set_max_connections(mnet_app_t *app, int max_connections)
@@ -1160,6 +1405,8 @@ void mnet_static(mnet_app_t *app, const char *url_prefix,
     r->user_data = cfg;
     r->path_allocated = 1;
 
+    cfg->app = app;
+
     app->route_count++;
 }
 
@@ -1185,38 +1432,136 @@ int mnet_run(mnet_app_t *app, uint16_t port)
 
     g_running_app = app;
 
-    mnet_socket_t server = mnet_tcp_listen(port, 16);
-    if (server == MNET_INVALID_SOCKET) return -1;
+    mnet_socket_t server = mnet_tcp_listen(port, MNET_LISTEN_BACKLOG);
+    if (server == MNET_INVALID_SOCKET) {
+        mnet_log_msg(MNET_LOG_ERROR, "failed to listen on port %d", port);
+        return -1;
+    }
 
     app->running = 1;
+    app->active_connections = 0;
 
-    fprintf(stderr, "[mnet] listening on port %d\n", port);
+    mnet_app_log(app, MNET_LOG_INFO, "listening on port %d", port);
+
+    /*
+     * Single-threaded mode is kept for workers <= 1: it has no synchronisation
+     * overhead and is what the library did before the pool existed.
+     */
+    if (app->workers <= 1) {
+        while (app->running) {
+            mnet_socket_t client = mnet_tcp_accept(server);
+            if (client == MNET_INVALID_SOCKET) {
+                if (mnet_socket_errno() == MNET_EINTR) continue;
+                mnet_app_log(app, MNET_LOG_ERROR,
+                    "accept failed, stopping the server");
+                break;
+            }
+
+            if (app->max_connections > 0 &&
+                app->active_connections >= app->max_connections) {
+                /* Refuse rather than queue: a plain counter, not per-IP. */
+                mnet_app_log(app, MNET_LOG_WARN,
+                    "refused a connection: %d active (max_connections)",
+                    app->active_connections);
+                send_simple_error(client, 503, "Service Unavailable",
+                    "The server is at its connection limit.", app->debug);
+                mnet_close(client);
+                continue;
+            }
+
+            app->active_connections++;
+            mnet_handle_client(app, client);
+            mnet_close(client);
+            app->active_connections--;
+        }
+
+        mnet_close(server);
+        mnet_app_log(app, MNET_LOG_INFO, "server stopped");
+        return 0;
+    }
+
+    /* Multithreaded: a bounded queue feeding a fixed pool of workers. */
+    size_t capacity = app->max_connections > 0 ?
+        (size_t)app->max_connections : 128;
+
+    mnet_pool_t pool;
+    memset(&pool, 0, sizeof(pool));
+    pool.app = app;
+    pool.capacity = capacity;
+    pool.slots = malloc(capacity * sizeof(mnet_socket_t));
+    pool.threads = malloc((size_t)app->workers * sizeof(mnet_thread_t));
+
+    if (pool.slots == NULL || pool.threads == NULL) {
+        free(pool.slots);
+        free(pool.threads);
+        mnet_close(server);
+        mnet_log_msg(MNET_LOG_ERROR, "failed to allocate the worker pool");
+        return -1;
+    }
+
+    mnet_mutex_init(&pool.mutex);
+    mnet_cond_init(&pool.not_empty);
+    mnet_cond_init(&pool.not_full);
+
+    for (size_t i = 0; i < (size_t)app->workers; i++) {
+        if (mnet_thread_create(&pool.threads[i], mnet_worker_main, &pool) != 0) {
+            mnet_app_log(app, MNET_LOG_ERROR,
+                "failed to start worker %d of %d",
+                (int)i, app->workers);
+            /* Fall back to serving with the workers that did start. */
+            pool.thread_count = i;
+            app->workers = (int)i;
+            if (i == 0) {
+                mnet_pool_shutdown(&pool);
+                mnet_close(server);
+                return -1;
+            }
+            break;
+        }
+        pool.thread_count++;
+    }
+
+    mnet_app_log(app, MNET_LOG_INFO, "serving with %d worker threads",
+        app->workers);
 
     while (app->running) {
         mnet_socket_t client = mnet_tcp_accept(server);
         if (client == MNET_INVALID_SOCKET) {
             if (mnet_socket_errno() == MNET_EINTR) continue;
+            mnet_app_log(app, MNET_LOG_ERROR,
+                "accept failed, stopping the server");
             break;
         }
 
-        if (app->max_connections > 0) {
-            while (g_active_connections >= app->max_connections && app->running) {
-                mnet_sleep_ms(100);
-            }
-            if (!app->running) {
-                mnet_close(client);
-                break;
-            }
+        mnet_mutex_lock(&pool.mutex);
+        int active = app->active_connections;
+        mnet_mutex_unlock(&pool.mutex);
+
+        if (app->max_connections > 0 && active >= app->max_connections) {
+            mnet_app_log(app, MNET_LOG_WARN,
+                "refused a connection: %d active (max_connections)", active);
+            send_simple_error(client, 503, "Service Unavailable",
+                "The server is at its connection limit.", app->debug);
+            mnet_close(client);
+            continue;
         }
 
-        mnet_atomic_inc(&g_active_connections);
-        mnet_handle_client(app, client);
-        mnet_close(client);
-        mnet_atomic_dec(&g_active_connections);
+        mnet_mutex_lock(&pool.mutex);
+        app->active_connections++;
+        mnet_mutex_unlock(&pool.mutex);
+
+        if (mnet_pool_push(&pool, client) != 0) {
+            mnet_mutex_lock(&pool.mutex);
+            app->active_connections--;
+            mnet_mutex_unlock(&pool.mutex);
+            mnet_close(client);
+            break;
+        }
     }
 
+    mnet_pool_shutdown(&pool);
     mnet_close(server);
-    fprintf(stderr, "[mnet] server stopped\n");
+    mnet_app_log(app, MNET_LOG_INFO, "server stopped");
     return 0;
 }
 

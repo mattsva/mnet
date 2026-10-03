@@ -3,12 +3,24 @@ project(mnet VERSION 0.2.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+
+# The same warning levels as the Makefile: everything on, warnings are errors.
+if(MSVC)
+    add_compile_options(/W4 /WX)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+endif()
+
 if(NOT WIN32)
     add_compile_definitions(_POSIX_C_SOURCE=200112L)
 endif()
 if(APPLE)
     add_compile_definitions(_DARWIN_C_SOURCE)
 endif()
+
+# The worker pool needs threads on POSIX.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
 
 # Optional hardening/sanitizer build: -DMNET_SANITIZE=ON
 option(MNET_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
@@ -39,6 +51,10 @@ set_target_properties(mnet_shared PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION 1
 )
+
+# Threads are part of the library's implementation, so consumers must link them.
+target_link_libraries(mnet_static PUBLIC Threads::Threads)
+target_link_libraries(mnet_shared PRIVATE Threads::Threads)
 
 # Winsock is required by every target that links mnet on Windows.
 if(WIN32)

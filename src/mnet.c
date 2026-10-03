@@ -4,6 +4,7 @@
 #include "mnet_internal.h"
 
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -44,6 +45,7 @@ mnet_socket_t mnet_tcp_listen(
     int backlog)
 {
     if (backlog <= 0) {
+        mnet_log_msg(MNET_LOG_ERROR, "invalid listen backlog %d", backlog);
         errno = EINVAL;
         return MNET_INVALID_SOCKET;
     }
@@ -84,6 +86,8 @@ mnet_socket_t mnet_tcp_listen(
     );
 
     if (error != 0) {
+        mnet_log_msg(MNET_LOG_ERROR,
+            "getaddrinfo failed for port %u: %d", (unsigned int)port, error);
         errno = EINVAL;
         return MNET_INVALID_SOCKET;
     }

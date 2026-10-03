@@ -1,13 +1,34 @@
 project('mnet', 'c',
     version: '0.2.0',
-    default_options: ['c_std=c17']
+    default_options: ['c_std=c17'],
 )
+
+# The same warning levels as the Makefile: everything on, warnings are errors.
+cc = meson.get_compiler('c')
+warning_flags = ['-Wall', '-Wextra', '-Wpedantic', '-Werror']
+if cc.get_id() != 'msvc'
+    add_project_arguments(warning_flags, language: 'c')
+endif
+
+# glibc's _FORTIFY_SOURCE is only meaningful with optimization, and some
+# toolchains (notably the Nix gcc wrapper) define it unconditionally. At -O0,
+# which is Meson's default for the debug buildtype, glibc then emits
+# "#warning _FORTIFY_SOURCE requires compiling with optimization (-O)" and
+# -Werror would fail the build over it. The macro cannot be undefined from the
+# command line, so keep preprocessor notices non-fatal in unoptimized builds.
+# Ordinary diagnostics (-Wall/-Wextra/-Wpedantic) remain errors.
+if cc.get_id() != 'msvc' and get_option('optimization') == '0'
+    add_project_arguments('-Wno-error=cpp', language: 'c')
+endif
 
 add_project_arguments('-D_POSIX_C_SOURCE=200112L', language: 'c')
 
 if host_machine.system() == 'darwin'
     add_project_arguments('-D_DARWIN_C_SOURCE', language: 'c')
 endif
+
+# The worker pool needs threads on POSIX.
+thread_dep = dependency('threads')
 
 # Optional sanitizer build: meson setup build -Dsanitize=true
 if get_option('sanitize')
@@ -32,12 +53,14 @@ mnet_inc = include_directories('include')
 mnet_static = static_library('mnet',
     mnet_sources,
     include_directories: mnet_inc,
+    dependencies: thread_dep,
 )
 
 # Shared library
 mnet_shared = shared_library('mnet',
     mnet_sources,
     include_directories: mnet_inc,
+    dependencies: thread_dep,
     version: meson.project_version(),
     soversion: '1',
 )

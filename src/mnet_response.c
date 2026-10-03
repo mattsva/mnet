@@ -55,6 +55,12 @@ int mnet_url_decode_ex(const char *src, size_t src_len, char *dst,
     return (int)pos;
 }
 
+int mnet_url_decode_safe(const char *src, char *dst, size_t dst_size)
+{
+    if (src == NULL) return -1;
+    return mnet_url_decode_ex(src, strlen(src), dst, dst_size);
+}
+
 size_t mnet_url_decode(char *out, size_t out_size, const char *s)
 {
     int n;

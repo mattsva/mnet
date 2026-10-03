@@ -43,6 +43,24 @@ int mnet_url_decode_ex(const char *src, size_t src_len, char *dst,
     size_t dst_size);
 
 /*
+ * Bounds-checked URL decoder with an explicit destination capacity.
+ *
+ * Decodes the NUL-terminated src into dst, never writing more than dst_size
+ * bytes including the terminating NUL. It fails rather than truncating: if the
+ * decoded result (or any percent escape) does not fit, nothing is written and
+ * the return value is negative.
+ *
+ * Returns the decoded length (excluding the NUL) on success, or -1 on failure:
+ * NULL arguments, zero dst_size, a malformed or truncated escape, a %00 escape,
+ * or a result that does not fit.
+ *
+ * This is the same operation as mnet_url_decode_ex() with the source length
+ * taken from strlen(); it exists because the (dst, dst_size, src) argument
+ * order reads more naturally at call sites that already know the capacity.
+ */
+int mnet_url_decode_safe(const char *src, char *dst, size_t dst_size);
+
+/*
  * Validate an HTTP header value taken from untrusted input.
  * Returns 1 if the value is safe to emit, 0 if it contains CR, LF or other
  * control characters (which could allow header injection / response splitting).

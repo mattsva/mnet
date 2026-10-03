@@ -1,6 +1,6 @@
 project('mnet', 'c',
     version: '0.1.0',
-    default_options: ['c_std=c17']
+    default_options: ['c_std=c17', 'c_args=-D_POSIX_C_SOURCE=200112L']
 )
 
 # Source files
@@ -33,16 +33,19 @@ mnet_shared = shared_library('mnet',
 example_http_server = executable('example_http_server',
     'example/example_http_server.c',
     link_with: mnet_static,
+    include_directories: mnet_inc,
 )
 
 example_api_server = executable('example_api_server',
     'example/example_api_server.c',
     link_with: mnet_static,
+    include_directories: mnet_inc,
 )
 
 example_combined = executable('example_combined',
     'example/example_combined.c',
     link_with: mnet_static,
+    include_directories: mnet_inc,
 )
 
 # Tests
@@ -54,10 +57,7 @@ test_mnet = executable('test_mnet',
 
 test('mnet_tests', test_mnet)
 
-# Install
+# Install headers (libraries are installed by default)
 install_headers('include/mnet.h', 'include/mnet_app.h', 'include/mnet_request.h',
     'include/mnet_response.h', 'include/mnet_router.h', 'include/mnet_socket.h',
     subdir: 'mnet')
-
-install_library(mnet_static)
-install_library(mnet_shared)

@@ -106,6 +106,11 @@ target_link_libraries(test_features PRIVATE mnet_static)
 target_include_directories(test_features PRIVATE include src test)
 add_test(NAME mnet_feature_tests COMMAND test_features)
 
+add_executable(test_security test/test_security.c)
+target_link_libraries(test_security PRIVATE mnet_static)
+target_include_directories(test_security PRIVATE include src test)
+add_test(NAME mnet_security_tests COMMAND test_security)
+
 # Install
 install(TARGETS mnet_static mnet_shared
     ARCHIVE DESTINATION lib

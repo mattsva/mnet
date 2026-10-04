@@ -39,12 +39,13 @@ example/example_combined: $(SRCS) example/example_combined.c
 	$(CC) $(CFLAGS) $(SRCS) $< -o $@
 
 # Run tests (builds + runs)
-test: clean test_mnet test_http test_parser test_stress test_features
+test: clean test_mnet test_http test_parser test_stress test_features test_security
 	./test_mnet
 	./test_http
 	./test_parser
 	./test_stress
 	./test_features
+	./test_security
 
 test_mnet: $(SRCS) test/test_mnet.c
 	$(CC) $(CFLAGS) -Itest $(SRCS) test/test_mnet.c -o $@ $(LDFLAGS)
@@ -60,6 +61,9 @@ test_stress: $(SRCS) test/test_stress.c
 
 test_features: $(SRCS) test/test_features.c
 	$(CC) $(CFLAGS) -Isrc $(SRCS) test/test_features.c -o $@ $(LDFLAGS)
+
+test_security: $(SRCS) test/test_security.c
+	$(CC) $(CFLAGS) -Isrc $(SRCS) test/test_security.c -o $@ $(LDFLAGS)
 
 # Clean
 clean:

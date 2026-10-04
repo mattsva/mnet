@@ -131,6 +131,14 @@ test_features = executable('test_features',
 
 test('mnet_feature_tests', test_features)
 
+test_security = executable('test_security',
+    'test/test_security.c',
+    link_with: mnet_static,
+    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+)
+
+test('mnet_security_tests', test_security)
+
 # Install headers (libraries are installed by default)
 install_headers('include/mnet.h', 'include/mnet_app.h', 'include/mnet_request.h',
     'include/mnet_response.h', 'include/mnet_router.h', 'include/mnet_socket.h',

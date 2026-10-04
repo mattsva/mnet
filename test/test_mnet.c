@@ -265,7 +265,7 @@ static void test_mnet_route_match_no_match(void)
 
     const char *values[4] = {0};
     int n = mnet_route_match(&route, "/api/users", values, 4);
-    assert(n == 0);
+    assert(n == -1); /* no match returns -1, not 0 */
     (void)n;
     printf("  PASS test_mnet_route_match_no_match\n");
 }
@@ -280,7 +280,7 @@ static void test_mnet_route_match_static(void)
 
     const char *values[4] = {0};
     int n = mnet_route_match(&route, "/", values, 4);
-    assert(n == 0); /* no params extracted */
+    assert(n == 0); /* matched, no params extracted — returns 0 */
     (void)n;
     printf("  PASS test_mnet_route_match_static\n");
 }
@@ -295,7 +295,7 @@ static void test_mnet_route_match_partial_free(void)
 
     const char *values[4] = {0};
     int n = mnet_route_match(&route, "/api/users/42", values, 4);
-    assert(n == 0);
+    assert(n == -1); /* no match returns -1 */
     (void)n;
     printf("  PASS test_mnet_route_match_partial_free\n");
 }

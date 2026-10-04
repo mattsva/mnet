@@ -14,9 +14,9 @@
  * On Windows the socket setup differs; the test is skipped there (the library
  * itself is still built and unit-tested on Windows).
  *
- * Note: the server is single-threaded, so each connection here sends one
- * complete request and reads the reply. A receive timeout makes a missing
- * answer fail fast instead of hanging the run.
+ * Note: the server is multi-threaded by default, so each connection here
+ * sends one complete request and reads the reply. A receive timeout makes a
+ * missing answer fail fast instead of hanging the run.
  */
 #define _GNU_SOURCE
 #include <mnet.h>

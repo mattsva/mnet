@@ -14,8 +14,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifndef _WIN32
+#include <poll.h>
 #include <signal.h>
 #include <sys/stat.h>
 #endif
@@ -41,6 +43,8 @@
 #define MNET_PARSE_TOO_LARGE 2
 #define MNET_PARSE_HEADERS_TOO_LARGE 3
 #define MNET_PARSE_UNSUPPORTED_METHOD 4
+#define MNET_PARSE_BAD_CONTENT_LENGTH 5
+#define MNET_PARSE_DUPLICATE_CONTENT_LENGTH 6
 
 typedef struct {
     char *url_prefix;
@@ -167,11 +171,19 @@ static int mnet_add_route(
             const char *start = p;
             while (*p && *p != '/' && *p != '.') p++;
             size_t len = (size_t)(p - start);
-            if (len == 0) continue;
-            char *name = malloc(len + 1);
-            if (name == NULL) goto fail;
-            memcpy(name, start, len);
-            name[len] = '\0';
+            char *name;
+            if (len == 0) {
+                /* Unnamed param: generate a name so the matcher's count
+                   matches param_names. */
+                name = malloc(16);
+                if (name == NULL) goto fail;
+                snprintf(name, 16, "_%zu", param_count);
+            } else {
+                name = malloc(len + 1);
+                if (name == NULL) goto fail;
+                memcpy(name, start, len);
+                name[len] = '\0';
+            }
 
             const char **tmp = realloc(r->param_names,
                 (param_count + 2) * sizeof(const char *));
@@ -270,26 +282,11 @@ static mnet_route_t *mnet_find_route(
         if (r->method != method) continue;
 
         int n = mnet_route_match(r, path, out_params, max_params);
-        if (n > 0) {
+        if (n >= 0) {
             *out_count = (size_t)n;
             return r;
         }
-
-        /*
-         * n == 0 means "no match". mnet_route_match() has already released any
-         * parameter values it allocated before deciding the match failed, so
-         * there is nothing to free here. Freeing again would be a double free
-         * (and would walk max_params slots rather than the real count).
-         */
-        if (n == 0) {
-            if (strcmp(r->path, path) == 0) {
-                return r;
-            }
-            continue;
-        }
-
-        /* n < 0: allocation error inside the matcher; also already cleaned up. */
-        return NULL;
+        /* n == -1: no match, already cleaned up. */
     }
 
     /*
@@ -538,18 +535,31 @@ static int read_full_body(mnet_socket_t client, const char *buffer,
     /* Find the Content-Length header. Only a line-initial match counts, so a
        header such as "X-Content-Length:" is not mistaken for it. */
     const char *cl_header = NULL;
+    int cl_count = 0;
     const char *search = buffer;
     while ((search = strcasestr(search, "content-length:")) != NULL) {
         if (search == buffer || search[-1] == '\n') {
             cl_header = search;
-            break;
+            cl_count++;
         }
-        search += 16;
+        search += 15;
+    }
+    /* Duplicate Content-Length is a request smuggling attempt. */
+    if (cl_count > 1) return -3;
+
+    /* Reject Transfer-Encoding: chunked — the server does not implement
+       chunked request bodies. */
+    if (strcasestr(buffer, "transfer-encoding:") != NULL) {
+        const char *te = strcasestr(buffer, "transfer-encoding:");
+        if (te == buffer || te[-1] == '\n') {
+            return -4;
+        }
     }
 
     size_t content_length = 0;
     if (cl_header != NULL) {
-        const char *val = cl_header + 16;
+        /* "content-length:" is 15 characters, not 16. */
+        const char *val = cl_header + 15;
         const char *p;
         int digit_seen = 0;
         int overflow = 0;
@@ -564,7 +574,7 @@ static int read_full_body(mnet_socket_t client, const char *buffer,
             if (parsed > max_body_size) overflow = 1;
         }
         /* The value must be a plain decimal number followed by end of line. */
-        if (!digit_seen || (*p != '\r' && *p != '\n')) return -1;
+        if (!digit_seen || (*p != '\r' && *p != '\n')) return -2;
         if (overflow) return -1;
 
         content_length = parsed;
@@ -714,11 +724,14 @@ static void send_response(mnet_socket_t client, const mnet_response_t *r,
         case 201: status_text = "Created"; break;
         case 204: status_text = "No Content"; break;
         case 301: status_text = "Moved Permanently"; break;
+        case 302: status_text = "Found"; break;
         case 400: status_text = "Bad Request"; break;
+        case 401: status_text = "Unauthorized"; break;
         case 403: status_text = "Forbidden"; break;
         case 404: status_text = "Not Found"; break;
         case 405: status_text = "Method Not Allowed"; break;
         case 413: status_text = "Payload Too Large"; break;
+        case 429: status_text = "Too Many Requests"; break;
         case 431: status_text = "Request Header Fields Too Large"; break;
         case 500: status_text = "Internal Server Error"; break;
         case 503: status_text = "Service Unavailable"; break;
@@ -758,16 +771,19 @@ static void send_response(mnet_socket_t client, const mnet_response_t *r,
 
     mnet_send(client, header, (size_t)hlen);
 
-    if (!head_only && r->body && r->body_length > 0) {
+    if (!head_only) {
         if (r->chunked) {
-            char chunk_header[32];
-            int chlen = snprintf(chunk_header, sizeof(chunk_header),
-                "%zx\r\n", r->body_length);
-            mnet_send(client, chunk_header, (size_t)chlen);
-            mnet_send(client, r->body, r->body_length);
-            mnet_send(client, "\r\n", 2);
+            if (r->body && r->body_length > 0) {
+                char chunk_header[32];
+                int chlen = snprintf(chunk_header, sizeof(chunk_header),
+                    "%zx\r\n", r->body_length);
+                mnet_send(client, chunk_header, (size_t)chlen);
+                mnet_send(client, r->body, r->body_length);
+                mnet_send(client, "\r\n", 2);
+            }
+            /* Always send the terminating chunk, even for an empty body. */
             mnet_send(client, "0\r\n\r\n", 5);
-        } else {
+        } else if (r->body && r->body_length > 0) {
             mnet_send(client, r->body, r->body_length);
         }
     }
@@ -805,7 +821,7 @@ static void send_not_found(mnet_socket_t client, const char *path, int debug,
     int keep_alive)
 {
     if (debug) {
-        fprintf(stderr, "[mnet] 404  %s %s\n", "GET", path);
+        fprintf(stderr, "[mnet] 404  %s\n", path);
     }
     const char body[] =
         "<!doctype html>"
@@ -896,23 +912,53 @@ static int parse_request(mnet_socket_t client, const char *buffer,
 
     int r = read_full_body(client, buffer, received, &body_ptr, &body_len,
         &body_heap, max_body_size);
-    if (r != 0) return MNET_PARSE_TOO_LARGE;
+    if (r == -1) return MNET_PARSE_TOO_LARGE;
+    if (r == -2) return MNET_PARSE_BAD_CONTENT_LENGTH;
+    if (r == -3) return MNET_PARSE_DUPLICATE_CONTENT_LENGTH;
+    if (r == -4) return MNET_PARSE_UNSUPPORTED_METHOD;
 
     out->body = body_ptr;
     out->body_length = body_len;
     out->body_heap = body_heap;
 
-    const char *line_end = memchr(buffer, '\n',
-        strstr(buffer, "\r\n\r\n") ? strstr(buffer, "\r\n\r\n") - buffer : 0);
-    if (line_end) {
-        const char *hdr_section = line_end + 1;
-        if (parse_headers(hdr_section, &out->extras.header_names,
-                &out->extras.header_values, &out->extras.header_count) != 0) {
+    /* Find the end of the header block to confine header parsing to headers
+       only. Without this, a POST body containing lines like "X-Admin: true"
+       would be parsed as a request header. */
+    const char *body_sep = strstr(buffer, "\r\n\r\n");
+    const char *body_sep2 = strstr(buffer, "\n\n");
+    const char *end_of_headers = body_sep ? body_sep : (body_sep2 ? body_sep2 : NULL);
+
+    if (end_of_headers) {
+        /* We need to pass only the header section to parse_headers, not the
+           body. Create a temporary buffer with just the headers. */
+        size_t hdr_len = (size_t)(end_of_headers - buffer);
+        char *hdr_copy = malloc(hdr_len + 1);
+        if (hdr_copy == NULL) return MNET_PARSE_HEADERS_TOO_LARGE;
+        memcpy(hdr_copy, buffer, hdr_len);
+        hdr_copy[hdr_len] = '\0';
+
+        int rc = parse_headers(hdr_copy, &out->extras.header_names,
+            &out->extras.header_values, &out->extras.header_count);
+        free(hdr_copy);
+        if (rc != 0) {
             return MNET_PARSE_HEADERS_TOO_LARGE;
         }
 
         for (size_t i = 0; i < out->extras.header_count; i++) {
             if (strcasecmp(out->extras.header_names[i], "Cookie") == 0) {
+                /* Free any previous cookie arrays before parsing another
+                   Cookie header, so multiple Cookie headers don't leak. */
+                if (out->extras.cookie_names != NULL) {
+                    for (size_t j = 0; j < out->extras.cookie_count; j++) {
+                        free(out->extras.cookie_names[j]);
+                        free(out->extras.cookie_values[j]);
+                    }
+                    free(out->extras.cookie_names);
+                    free(out->extras.cookie_values);
+                    out->extras.cookie_names = NULL;
+                    out->extras.cookie_values = NULL;
+                    out->extras.cookie_count = 0;
+                }
                 parse_cookies(out->extras.header_values[i],
                     &out->extras.cookie_names, &out->extras.cookie_values,
                     &out->extras.cookie_count);
@@ -998,17 +1044,16 @@ static mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
 
 static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 {
-    /* A negative timeout means "disabled"; otherwise the configured value is
-       already a positive default, so no fallback is needed here. */
-    if (app->timeout_seconds > 0) {
-        mnet_set_socket_timeout(client, app->timeout_seconds);
-    }
-
     int keep_alive = 0;
     do {
+        /* Use an absolute deadline for the entire request, not a per-recv
+           timeout. SO_RCVTIMEO applies per recv() call, so a client that
+           sends one byte every timeout interval can hold the connection
+           forever. */
+        int timeout_ms = app->timeout_seconds > 0 ?
+            app->timeout_seconds * 1000 : 30000;
         if (keep_alive && app->keep_alive_timeout > 0) {
-            /* Idle wait for the next request on a reused connection. */
-            mnet_set_socket_timeout(client, app->keep_alive_timeout);
+            timeout_ms = app->keep_alive_timeout * 1000;
         }
 
         char buffer[MNET_REQUEST_BUFFER_SIZE];
@@ -1016,9 +1061,18 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
         int have_request = 0;
         int too_large = 0;
 
-        /* Read until the end of the header block arrives, or the buffer is
-           full. Headers that do not fit are rejected, never truncated. */
+        /* Read until the end of the header block arrives, the buffer is
+           full, or the absolute deadline passes. */
+        int64_t deadline_ms = (int64_t)time(NULL) * 1000 + timeout_ms;
         while (used < sizeof(buffer) - 1) {
+            int64_t now_ms = (int64_t)time(NULL) * 1000;
+            int64_t left = deadline_ms - now_ms;
+            if (left <= 0) break;
+
+            struct pollfd pfd = { client, POLLIN, 0 };
+            int pr = poll(&pfd, 1, (int)left);
+            if (pr <= 0) break;
+
             ssize_t n = mnet_recv(client, buffer + used,
                 sizeof(buffer) - 1 - used);
             if (n <= 0) break;
@@ -1033,7 +1087,6 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 
         if (!have_request) {
             if (used >= sizeof(buffer) - 1) too_large = 1;
-            /* Otherwise the client closed or timed out: nothing to answer. */
             if (too_large) {
                 mnet_app_log(app, MNET_LOG_WARN,
                     "rejected request: header block exceeds %d bytes",
@@ -1059,6 +1112,16 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
                     "rejected request: body exceeds the configured limit");
                 send_simple_error(client, 413, "Payload Too Large",
                     "Request body exceeds the maximum size.", app->debug);
+            } else if (pr == MNET_PARSE_BAD_CONTENT_LENGTH) {
+                mnet_app_log(app, MNET_LOG_WARN,
+                    "rejected request: malformed Content-Length");
+                send_simple_error(client, 400, "Bad Request",
+                    "The Content-Length header is malformed.", app->debug);
+            } else if (pr == MNET_PARSE_DUPLICATE_CONTENT_LENGTH) {
+                mnet_app_log(app, MNET_LOG_WARN,
+                    "rejected request: duplicate Content-Length");
+                send_simple_error(client, 400, "Bad Request",
+                    "Duplicate Content-Length headers.", app->debug);
             } else if (pr == MNET_PARSE_HEADERS_TOO_LARGE) {
                 mnet_app_log(app, MNET_LOG_WARN,
                     "rejected request: header count or line length exceeds the limit");

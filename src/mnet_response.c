@@ -250,7 +250,18 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
     char *buf = malloc(cap);
     if (buf == NULL) {
         mnet_response_t r = {
-            .status = 200,
+            .status = 500,
+            .content_type = "application/json",
+            .body = strdup("null"),
+            .body_length = 4,
+        };
+        return r;
+    }
+
+    if (format == NULL) {
+        free(buf);
+        mnet_response_t r = {
+            .status = 500,
             .content_type = "application/json",
             .body = strdup("null"),
             .body_length = 4,
@@ -266,7 +277,7 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
             if (nb == NULL) {
                 free(buf);
                 mnet_response_t r = {
-                    .status = 200,
+                    .status = 500,
                     .content_type = "application/json",
                     .body = strdup("null"),
                     .body_length = 4,
@@ -299,7 +310,7 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
             if (escaped == NULL) {
                 free(buf);
                 mnet_response_t r = {
-                    .status = 200,
+                    .status = 500,
                     .content_type = "application/json",
                     .body = strdup("null"),
                     .body_length = 4,
@@ -314,7 +325,7 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
                     free(escaped);
                     free(buf);
                     mnet_response_t r = {
-                        .status = 200,
+                        .status = 500,
                         .content_type = "application/json",
                         .body = strdup("null"),
                         .body_length = 4,
@@ -343,6 +354,48 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
             memcpy(spec, spec_start, spec_len);
             spec[spec_len] = '\0';
 
+            /* Reject dangerous specifiers: %n, %p, %a, '*' width, and any
+               modifier on %s (flags, width, precision, length). */
+            const char *scan = spec + 1; /* skip '%' */
+            int reject = 0;
+            while (*scan && *scan != '%') {
+                if (strchr("0123456789+-# *.", *scan)) {
+                    /* flags, width, precision are only safe on non-%s */
+                    if (strchr("diouxXfFeEgGaA", *p)) {
+                        /* allow flags/width/precision on numeric conversions */
+                    } else {
+                        reject = 1;
+                        break;
+                    }
+                }
+                if (*scan == 'n' || *scan == 'p' || *scan == 'a') {
+                    reject = 1;
+                    break;
+                }
+                if (*scan == 'l' || *scan == 'h' || *scan == 'z' ||
+                    *scan == 'j' || *scan == 't' || *scan == 'L') {
+                    /* length modifiers: allow on diouxX only */
+                    if (!strchr("diouxX", *p)) {
+                        reject = 1;
+                        break;
+                    }
+                }
+                scan++;
+            }
+            /* Also reject if the conversion char itself is n, p, or a */
+            if (*p == 'n' || *p == 'p' || *p == 'a') reject = 1;
+
+            if (reject) {
+                free(buf);
+                mnet_response_t r = {
+                    .status = 500,
+                    .content_type = "application/json",
+                    .body = strdup("null"),
+                    .body_length = 4,
+                };
+                return r;
+            }
+
             char val[256];
             int vlen = vsnprintf(val, sizeof(val), spec, args);
             if (vlen > 0) {
@@ -353,7 +406,7 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
                     if (nb == NULL) {
                         free(buf);
                         mnet_response_t r = {
-                            .status = 200,
+                            .status = 500,
                             .content_type = "application/json",
                             .body = strdup("null"),
                             .body_length = 4,

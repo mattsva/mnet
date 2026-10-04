@@ -174,12 +174,28 @@ ssize_t mnet_send(
         return -1;
     }
 
+#ifdef __linux__
+    return (ssize_t)send(
+        socket,
+        (const char *)data,
+        (int)length,
+        MSG_NOSIGNAL
+    );
+#elif defined(__APPLE__)
+    return (ssize_t)send(
+        socket,
+        (const char *)data,
+        (int)length,
+        SO_NOSIGPIPE
+    );
+#else
     return (ssize_t)send(
         socket,
         (const char *)data,
         (int)length,
         0
     );
+#endif
 }
 
 ssize_t mnet_recv(

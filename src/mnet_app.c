@@ -22,6 +22,15 @@
 #include <sys/stat.h>
 #endif
 
+/* Millisecond-resolution monotonic clock for deadlines. time(NULL) has
+   1-second resolution, which makes sub-second timeouts unreliable. */
+static int64_t now_ms_mono(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
 #define MNET_INITIAL_ROUTE_CAPACITY 8
 #define MNET_REQUEST_BUFFER_SIZE 8192
 #define MNET_MAX_HEADER_BYTES MNET_REQUEST_BUFFER_SIZE
@@ -45,6 +54,7 @@
 #define MNET_PARSE_UNSUPPORTED_METHOD 4
 #define MNET_PARSE_BAD_CONTENT_LENGTH 5
 #define MNET_PARSE_DUPLICATE_CONTENT_LENGTH 6
+#define MNET_PARSE_UNSUPPORTED_TRANSFER_ENCODING 7
 
 typedef struct {
     char *url_prefix;
@@ -515,7 +525,7 @@ static int parse_raw_request(
  */
 static int read_full_body(mnet_socket_t client, const char *buffer,
     ssize_t initial_received, char **body_out, size_t *body_len_out,
-    int *body_heap, size_t max_body_size)
+    int *body_heap, size_t max_body_size, int timeout_ms)
 {
     const char *sep = strstr(buffer, "\r\n\r\n");
     const char *sep2 = strstr(buffer, "\n\n");
@@ -533,11 +543,15 @@ static int read_full_body(mnet_socket_t client, const char *buffer,
     initial_body_len = (size_t)initial_received - body_offset;
 
     /* Find the Content-Length header. Only a line-initial match counts, so a
-       header such as "X-Content-Length:" is not mistaken for it. */
+       header such as "X-Content-Length:" is not mistaken for it.
+       The search is confined to the header section only — a "Content-Length:"
+       line in the body must not be honoured. */
     const char *cl_header = NULL;
     int cl_count = 0;
     const char *search = buffer;
+    const char *header_end = end_of_headers ? end_of_headers : buffer + initial_received;
     while ((search = strcasestr(search, "content-length:")) != NULL) {
+        if (search >= header_end) break;
         if (search == buffer || search[-1] == '\n') {
             cl_header = search;
             cl_count++;
@@ -548,11 +562,15 @@ static int read_full_body(mnet_socket_t client, const char *buffer,
     if (cl_count > 1) return -3;
 
     /* Reject Transfer-Encoding: chunked — the server does not implement
-       chunked request bodies. */
-    if (strcasestr(buffer, "transfer-encoding:") != NULL) {
-        const char *te = strcasestr(buffer, "transfer-encoding:");
-        if (te == buffer || te[-1] == '\n') {
-            return -4;
+       chunked request bodies. Confined to the header section only. */
+    {
+        const char *te_search = buffer;
+        while ((te_search = strcasestr(te_search, "transfer-encoding:")) != NULL) {
+            if (te_search >= header_end) break;
+            if (te_search == buffer || te_search[-1] == '\n') {
+                return -4;
+            }
+            te_search += 18;
         }
     }
 
@@ -581,8 +599,10 @@ static int read_full_body(mnet_socket_t client, const char *buffer,
     }
 
     if (content_length == 0) {
+        /* No Content-Length means no body. Any bytes after the header
+           block are not part of the request body. */
         *body_out = (char *)buffer + body_offset;
-        *body_len_out = initial_body_len;
+        *body_len_out = 0;
         return 0;
     }
 
@@ -602,7 +622,22 @@ static int read_full_body(mnet_socket_t client, const char *buffer,
     memcpy(full_body, buffer + body_offset, initial_body_len);
 
     size_t total_received = initial_body_len;
+    int64_t body_deadline_ms = now_ms_mono() + timeout_ms;
     while (total_received < content_length) {
+        int64_t now_ms = now_ms_mono();
+        int64_t left = body_deadline_ms - now_ms;
+        if (left <= 0) {
+            free(full_body);
+            return -1;
+        }
+
+        struct pollfd pfd = { client, POLLIN, 0 };
+        int pr = poll(&pfd, 1, (int)left);
+        if (pr <= 0) {
+            free(full_body);
+            return -1;
+        }
+
         ssize_t n = mnet_recv(client, full_body + total_received,
             content_length - total_received);
         if (n <= 0) {
@@ -885,7 +920,8 @@ typedef struct {
 } parsed_request_t;
 
 static int parse_request(mnet_socket_t client, const char *buffer,
-    ssize_t received, parsed_request_t *out, size_t max_body_size)
+    ssize_t received, parsed_request_t *out, size_t max_body_size,
+    int timeout_ms)
 {
     out->method[0] = '\0';
     out->path[0] = '\0';
@@ -911,11 +947,11 @@ static int parse_request(mnet_socket_t client, const char *buffer,
     }
 
     int r = read_full_body(client, buffer, received, &body_ptr, &body_len,
-        &body_heap, max_body_size);
+        &body_heap, max_body_size, timeout_ms);
     if (r == -1) return MNET_PARSE_TOO_LARGE;
     if (r == -2) return MNET_PARSE_BAD_CONTENT_LENGTH;
     if (r == -3) return MNET_PARSE_DUPLICATE_CONTENT_LENGTH;
-    if (r == -4) return MNET_PARSE_UNSUPPORTED_METHOD;
+    if (r == -4) return MNET_PARSE_UNSUPPORTED_TRANSFER_ENCODING;
 
     out->body = body_ptr;
     out->body_length = body_len;
@@ -1045,6 +1081,8 @@ static mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
 static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
 {
     int keep_alive = 0;
+    char buffer[MNET_REQUEST_BUFFER_SIZE];
+    size_t used = 0;
     do {
         /* Use an absolute deadline for the entire request, not a per-recv
            timeout. SO_RCVTIMEO applies per recv() call, so a client that
@@ -1056,16 +1094,21 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
             timeout_ms = app->keep_alive_timeout * 1000;
         }
 
-        char buffer[MNET_REQUEST_BUFFER_SIZE];
-        size_t used = 0;
         int have_request = 0;
         int too_large = 0;
 
+        /* Check if there's already a complete request in the buffer from
+           a previous read (keep-alive or pipelined). */
+        if (used > 0 && (strstr(buffer, "\r\n\r\n") != NULL ||
+                          strstr(buffer, "\n\n") != NULL)) {
+            have_request = 1;
+        }
+
         /* Read until the end of the header block arrives, the buffer is
            full, or the absolute deadline passes. */
-        int64_t deadline_ms = (int64_t)time(NULL) * 1000 + timeout_ms;
-        while (used < sizeof(buffer) - 1) {
-            int64_t now_ms = (int64_t)time(NULL) * 1000;
+        int64_t deadline_ms = now_ms_mono() + timeout_ms;
+        while (!have_request && used < sizeof(buffer) - 1) {
+            int64_t now_ms = now_ms_mono();
             int64_t left = deadline_ms - now_ms;
             if (left <= 0) break;
 
@@ -1100,7 +1143,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
         parsed_request_t parsed;
         size_t max_body = app->max_body_size > 0 ?
             app->max_body_size : MNET_MAX_BODY_SIZE;
-        int pr = parse_request(client, buffer, (ssize_t)used, &parsed, max_body);
+        int pr = parse_request(client, buffer, (ssize_t)used, &parsed, max_body, timeout_ms);
 
         if (pr != MNET_PARSE_OK) {
             if (pr == MNET_PARSE_UNSUPPORTED_METHOD) {
@@ -1127,6 +1170,11 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
                     "rejected request: header count or line length exceeds the limit");
                 send_simple_error(client, 431, "Request Header Fields Too Large",
                     "Request headers exceed the maximum size.", app->debug);
+            } else if (pr == MNET_PARSE_UNSUPPORTED_TRANSFER_ENCODING) {
+                mnet_app_log(app, MNET_LOG_WARN,
+                    "rejected request: Transfer-Encoding not supported");
+                send_simple_error(client, 501, "Not Implemented",
+                    "Transfer-Encoding is not supported.", app->debug);
             } else {
                 mnet_app_log(app, MNET_LOG_WARN,
                     "rejected request: could not parse the request line");
@@ -1161,6 +1209,30 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
         mnet_match_params_free(param_values, (int)param_count);
         free_extras(&parsed.extras);
         if (parsed.body_heap) free(parsed.body);
+
+        /* Check if there's another complete request already in the buffer
+           (pipelined). If so, don't read more — just loop and process it. */
+        if (keep_alive) {
+            const char *sep = strstr(buffer, "\r\n\r\n");
+            const char *sep2 = strstr(buffer, "\n\n");
+            const char *end_of_headers = sep ? sep : (sep2 ? sep2 : NULL);
+            if (end_of_headers) {
+                size_t header_len = (size_t)(end_of_headers - buffer) + (sep ? 4 : 2);
+                if (header_len < used) {
+                    /* There's more data after the headers — check if it
+                       contains another complete request. */
+                    size_t remaining = used - header_len;
+                    if (remaining > 0 && strstr(buffer + header_len, "\r\n\r\n") != NULL) {
+                        /* Move the pipelined request to the front of the buffer. */
+                        memmove(buffer, buffer + header_len, remaining);
+                        used = remaining;
+                        buffer[used] = '\0';
+                        continue;
+                    }
+                }
+            }
+            used = 0;
+        }
     } while (keep_alive);
 }
 

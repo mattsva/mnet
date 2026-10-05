@@ -74,7 +74,7 @@ static void test_jsonf(void)
     /* A precision on %s must not skip escaping (previously it was passed
        straight to vsnprintf, which allowed breaking out of the string). */
     CHECK(body_is(fmt_str("{\"a\":\"%.40s\"}", "x\",\"admin\":true,\"y\":\""),
-        "{\"a\":\"x\\\",\\\"admin\\\":true}\\\"y\\\":\\\"\"}"),
+        "{\"a\":\"x\\\",\\\"admin\\\":true,\\\"y\\\":\\\"\"}"),
         "jsonf: %.Ns escapes quotes (no JSON injection)");
 
     CHECK(body_is(fmt_str("{\"a\":\"%.3s\"}", "abcdef"), "{\"a\":\"abc\"}"),
@@ -158,7 +158,7 @@ static void test_jsonf(void)
         memset(big, 'a', sizeof(big) - 1);
         big[sizeof(big) - 1] = '\0';
         r = mnet_jsonf("{\"d\":\"%s\"}", big);
-        CHECK(r.status == 200 && r.body_length == 8 + 100000 + 2,
+        CHECK(r.status == 200 && r.body_length == 6 + 100000 + 2,
             "jsonf: 100 KB string");
         mnet_response_free(&r);
     }
@@ -435,7 +435,7 @@ static void test_content_length(void)
 
     CHECK(fetch_str("POST /len HTTP/1.1\r\nHost: x\r\nContent-Length:100\r\n"
         "Connection: close\r\n\r\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", out, sizeof(out))
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", out, sizeof(out))
         == 200 && strstr(out, "\"n\":100") != NULL,
         "Content-Length:100 is not misread as 00");
 
@@ -488,20 +488,25 @@ static void test_keepalive_and_pipelining(void)
     close(fd);
     CHECK(responses == 2, "keep-alive still serves sequential requests");
 
-    /* Two requests in one packet: the second cannot be served, so the
-       connection must be closed rather than left hanging. */
+    /* Two requests in one packet: both must be served (pipelining). */
     fd = connect_to(PORT);
     if (fd < 0) { CHECK(0, "connect for pipelining test"); return; }
     {
         char two[256];
-        int64_t t0 = now_ms();
+        int responses = 0;
 
         snprintf(two, sizeof(two), "%s%s", one, one);
         send_all_fd(fd, two, strlen(two));
-        read_to_close(fd, buf, sizeof(buf), 8000);
+
+        /* Read both responses. */
+        for (int i = 0; i < 2; i++) {
+            ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
+            if (n <= 0) break;
+            buf[n] = '\0';
+            if (strstr(buf, "HTTP/1.1 200") != NULL) responses++;
+        }
         close(fd);
-        CHECK(now_ms() - t0 < 5000 && strstr(buf, "Connection: close") != NULL,
-            "pipelined request: connection is closed, not left hanging");
+        CHECK(responses == 2, "pipelined requests: both served");
     }
 }
 

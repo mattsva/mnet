@@ -300,6 +300,118 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
             continue;
         }
 
+        /* Reject trailing lone '%' */
+        if (*f == '\0') {
+            free(buf);
+            mnet_response_t r = {
+                .status = 500,
+                .content_type = "application/json",
+                .body = strdup("null"),
+                .body_length = 4,
+            };
+            return r;
+        }
+
+        /* Reject '*' (dynamic width) */
+        if (*f == '*') {
+            free(buf);
+            mnet_response_t r = {
+                .status = 500,
+                .content_type = "application/json",
+                .body = strdup("null"),
+                .body_length = 4,
+            };
+            return r;
+        }
+
+        /* Check for precision on %s: %.Ns */
+        if (*f == '.') {
+            const char *pf = f + 1;
+            while (*pf >= '0' && *pf <= '9') pf++;
+            if (*pf == 's') {
+                /* Precision on %s: truncate then escape */
+                int precision = 0;
+                const char *pn = f + 1;
+                while (*pn >= '0' && *pn <= '9') {
+                    precision = precision * 10 + (*pn - '0');
+                    pn++;
+                }
+                f = pf + 1; /* skip past 's' */
+                const char *s = va_arg(args, const char *);
+                if (s == NULL) s = "(null)";
+                size_t slen = strlen(s);
+                if ((size_t)precision < slen) {
+                    /* Don't split UTF-8 sequences: if the byte at the
+                       truncation point is a continuation byte (0x80-0xBF),
+                       back up to the start of the sequence. */
+                    size_t trunc = (size_t)precision;
+                    while (trunc > 0 && ((unsigned char)s[trunc] & 0xC0) == 0x80)
+                        trunc--;
+                    if (trunc > 0 && ((unsigned char)s[trunc] & 0x80) != 0) {
+                        /* The byte at trunc is a lead byte; check if the
+                           sequence fits within the precision. */
+                        int seq_len = 0;
+                        unsigned char b = (unsigned char)s[trunc];
+                        if ((b & 0xE0) == 0xC0) seq_len = 2;
+                        else if ((b & 0xF0) == 0xE0) seq_len = 3;
+                        else if ((b & 0xF8) == 0xF0) seq_len = 4;
+                        if (seq_len > 0 && trunc + (size_t)seq_len > (size_t)precision)
+                            trunc = 0; /* sequence doesn't fit, return empty */
+                    }
+                    slen = trunc;
+                }
+                size_t escaped_cap = slen * 6 + 1;
+                char *escaped = malloc(escaped_cap);
+                if (escaped == NULL) {
+                    free(buf);
+                    mnet_response_t r = {
+                        .status = 500,
+                        .content_type = "application/json",
+                        .body = strdup("null"),
+                        .body_length = 4,
+                    };
+                    return r;
+                }
+                /* Create a temporary buffer with just the truncated portion */
+                char *truncated = malloc(slen + 1);
+                if (truncated == NULL) {
+                    free(buf);
+                    mnet_response_t r = {
+                        .status = 500,
+                        .content_type = "application/json",
+                        .body = strdup("null"),
+                        .body_length = 4,
+                    };
+                    return r;
+                }
+                memcpy(truncated, s, slen);
+                truncated[slen] = '\0';
+                size_t elen = mnet_json_escape(escaped, escaped_cap, truncated);
+                free(truncated);
+                while (pos + elen + 1 >= cap) {
+                    cap *= 2;
+                    char *nb = realloc(buf, cap);
+                    if (nb == NULL) {
+                        free(escaped);
+                        free(buf);
+                        mnet_response_t r = {
+                            .status = 500,
+                            .content_type = "application/json",
+                            .body = strdup("null"),
+                            .body_length = 4,
+                        };
+                        return r;
+                    }
+                    buf = nb;
+                }
+                memcpy(buf + pos, escaped, elen);
+                pos += elen;
+                free(escaped);
+                continue;
+            }
+            /* Precision on non-%s: fall through to general handling */
+        }
+
         if (*f == 's') {
             f++; /* skip 's' */
             const char *s = va_arg(args, const char *);
@@ -340,12 +452,75 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
             continue;
         }
 
+        /* %c: single character with JSON escaping */
+        if (*f == 'c') {
+            f++;
+            int c = va_arg(args, int);
+            char escaped[16];
+            size_t elen;
+            if (c == '"') {
+                memcpy(escaped, "\\\"", 2);
+                elen = 2;
+            } else if (c == '\\') {
+                memcpy(escaped, "\\\\", 2);
+                elen = 2;
+            } else if (c == '\n') {
+                memcpy(escaped, "\\n", 2);
+                elen = 2;
+            } else if (c == '\r') {
+                memcpy(escaped, "\\r", 2);
+                elen = 2;
+            } else if (c == '\t') {
+                memcpy(escaped, "\\t", 2);
+                elen = 2;
+            } else if (c == 0) {
+                memcpy(escaped, "\\u0000", 6);
+                elen = 6;
+            } else if (c < 0x20) {
+                snprintf(escaped, sizeof(escaped), "\\u%04x", (unsigned)c);
+                elen = 6;
+            } else {
+                escaped[0] = (char)c;
+                elen = 1;
+            }
+            while (pos + elen + 1 >= cap) {
+                cap *= 2;
+                char *nb = realloc(buf, cap);
+                if (nb == NULL) {
+                    free(buf);
+                    mnet_response_t r = {
+                        .status = 500,
+                        .content_type = "application/json",
+                        .body = strdup("null"),
+                        .body_length = 4,
+                    };
+                    return r;
+                }
+                buf = nb;
+            }
+            memcpy(buf + pos, escaped, elen);
+            pos += elen;
+            continue;
+        }
+
         /* Other conversion: collect the full specifier and use vsnprintf */
         const char *spec_start = f - 1; /* point to '%' */
         const char *p = f;
         while (*p && *p != '%') {
             if (strchr("diouxXfFeEgGaAcCpPn", *p)) break;
             p++;
+        }
+
+        /* Reject truncated specifiers (no conversion char found) */
+        if (*p == '\0') {
+            free(buf);
+            mnet_response_t r = {
+                .status = 500,
+                .content_type = "application/json",
+                .body = strdup("null"),
+                .body_length = 4,
+            };
+            return r;
         }
 
         size_t spec_len = (size_t)(p - spec_start) + 1;
@@ -374,8 +549,8 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
                 }
                 if (*scan == 'l' || *scan == 'h' || *scan == 'z' ||
                     *scan == 'j' || *scan == 't' || *scan == 'L') {
-                    /* length modifiers: allow on diouxX only */
-                    if (!strchr("diouxX", *p)) {
+                    /* length modifiers: allow on diouxX and fFeEgGaA */
+                    if (!strchr("diouxXfFeEgGaA", *p)) {
                         reject = 1;
                         break;
                     }
@@ -396,14 +571,62 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
                 return r;
             }
 
-            char val[256];
-            int vlen = vsnprintf(val, sizeof(val), spec, args);
+            /* Reject absurd widths that would produce huge outputs */
+            {
+                const char *w = spec + 1;
+                long width = 0;
+                while (*w >= '0' && *w <= '9') {
+                    width = width * 10 + (*w - '0');
+                    w++;
+                }
+                if (width > 4096) {
+                    free(buf);
+                    mnet_response_t r = {
+                        .status = 500,
+                        .content_type = "application/json",
+                        .body = strdup("null"),
+                        .body_length = 4,
+                    };
+                    return r;
+                }
+            }
+
+            /* Two-pass: get length, then allocate and format */
+            va_list args_copy;
+            va_copy(args_copy, args);
+            int vlen = vsnprintf(NULL, 0, spec, args_copy);
+            va_end(args_copy);
+
             if (vlen > 0) {
                 size_t vlen_sz = (size_t)vlen;
+                char *val = malloc(vlen_sz + 1);
+                if (val == NULL) {
+                    free(buf);
+                    mnet_response_t r = {
+                        .status = 500,
+                        .content_type = "application/json",
+                        .body = strdup("null"),
+                        .body_length = 4,
+                    };
+                    return r;
+                }
+                vsnprintf(val, vlen_sz + 1, spec, args);
+
+                /* NaN and Inf are not valid JSON: replace with null */
+                if (strchr("fFeEgGaA", *p)) {
+                    if (strstr(val, "nan") || strstr(val, "inf") ||
+                        strstr(val, "NAN") || strstr(val, "INF")) {
+                        free(val);
+                        val = strdup("null");
+                        vlen_sz = 4;
+                    }
+                }
+
                 while (pos + vlen_sz + 1 >= cap) {
                     cap *= 2;
                     char *nb = realloc(buf, cap);
                     if (nb == NULL) {
+                        free(val);
                         free(buf);
                         mnet_response_t r = {
                             .status = 500,
@@ -417,6 +640,7 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
                 }
                 memcpy(buf + pos, val, vlen_sz);
                 pos += vlen_sz;
+                free(val);
             }
         }
         f = p + 1; /* advance past conversion character */

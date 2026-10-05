@@ -17,6 +17,7 @@ test_http
 test_parser
 test_stress
 test_features
+test_security
 fuzz_http
 mnet-server
 

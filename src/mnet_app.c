@@ -804,22 +804,32 @@ static void send_response(mnet_socket_t client, const mnet_response_t *r,
 
     if (hlen < 0 || (size_t)hlen >= sizeof(header)) return;
 
-    mnet_send(client, header, (size_t)hlen);
+    if (!head_only && !r->chunked && r->body && r->body_length > 0) {
+        /* Combine header and body into a single send so the client
+           receives the full response in one read. */
+        size_t total = (size_t)hlen + r->body_length;
+        char *combined = malloc(total);
+        if (combined == NULL) return;
+        memcpy(combined, header, (size_t)hlen);
+        memcpy(combined + hlen, r->body, r->body_length);
+        mnet_send(client, combined, total);
+        free(combined);
+    } else {
+        mnet_send(client, header, (size_t)hlen);
 
-    if (!head_only) {
-        if (r->chunked) {
-            if (r->body && r->body_length > 0) {
-                char chunk_header[32];
-                int chlen = snprintf(chunk_header, sizeof(chunk_header),
-                    "%zx\r\n", r->body_length);
-                mnet_send(client, chunk_header, (size_t)chlen);
-                mnet_send(client, r->body, r->body_length);
-                mnet_send(client, "\r\n", 2);
+        if (!head_only) {
+            if (r->chunked) {
+                if (r->body && r->body_length > 0) {
+                    char chunk_header[32];
+                    int chlen = snprintf(chunk_header, sizeof(chunk_header),
+                        "%zx\r\n", r->body_length);
+                    mnet_send(client, chunk_header, (size_t)chlen);
+                    mnet_send(client, r->body, r->body_length);
+                    mnet_send(client, "\r\n", 2);
+                }
+                /* Always send the terminating chunk, even for an empty body. */
+                mnet_send(client, "0\r\n\r\n", 5);
             }
-            /* Always send the terminating chunk, even for an empty body. */
-            mnet_send(client, "0\r\n\r\n", 5);
-        } else if (r->body && r->body_length > 0) {
-            mnet_send(client, r->body, r->body_length);
         }
     }
 }

@@ -498,12 +498,16 @@ static void test_keepalive_and_pipelining(void)
         snprintf(two, sizeof(two), "%s%s", one, one);
         send_all_fd(fd, two, strlen(two));
 
-        /* Read both responses. */
-        for (int i = 0; i < 2; i++) {
-            ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
-            if (n <= 0) break;
+        /* Read all responses. TCP may combine multiple responses into
+           one segment, so count all "HTTP/1.1 200" occurrences. */
+        ssize_t n;
+        while ((n = recv(fd, buf, sizeof(buf) - 1, 0)) > 0) {
             buf[n] = '\0';
-            if (strstr(buf, "HTTP/1.1 200") != NULL) responses++;
+            const char *p = buf;
+            while ((p = strstr(p, "HTTP/1.1 200")) != NULL) {
+                responses++;
+                p += 12;
+            }
         }
         close(fd);
         CHECK(responses == 2, "pipelined requests: both served");

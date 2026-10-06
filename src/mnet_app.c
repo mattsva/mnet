@@ -24,12 +24,39 @@
 
 /* Millisecond-resolution monotonic clock for deadlines. time(NULL) has
    1-second resolution, which makes sub-second timeouts unreliable. */
+#ifdef _WIN32
+static int64_t now_ms_mono(void)
+{
+    return (int64_t)GetTickCount64();
+}
+#else
 static int64_t now_ms_mono(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
+#endif
+
+/* poll() is not available on Windows. Use select() instead. */
+#ifdef _WIN32
+static int mnet_poll(int fd, int timeout_ms)
+{
+    fd_set fds;
+    struct timeval tv;
+    FD_ZERO(&fds);
+    FD_SET((unsigned int)fd, &fds);
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    return select(fd + 1, &fds, NULL, NULL, &tv);
+}
+#else
+static int mnet_poll(int fd, int timeout_ms)
+{
+    struct pollfd pfd = { fd, POLLIN, 0 };
+    return poll(&pfd, 1, timeout_ms);
+}
+#endif
 
 #define MNET_INITIAL_ROUTE_CAPACITY 8
 #define MNET_REQUEST_BUFFER_SIZE 8192
@@ -631,8 +658,7 @@ static int read_full_body(mnet_socket_t client, const char *buffer,
             return -1;
         }
 
-        struct pollfd pfd = { client, POLLIN, 0 };
-        int pr = poll(&pfd, 1, (int)left);
+        int pr = mnet_poll(client, (int)left);
         if (pr <= 0) {
             free(full_body);
             return -1;
@@ -1122,8 +1148,7 @@ static void mnet_handle_client(mnet_app_t *app, mnet_socket_t client)
             int64_t left = deadline_ms - now_ms;
             if (left <= 0) break;
 
-            struct pollfd pfd = { client, POLLIN, 0 };
-            int pr = poll(&pfd, 1, (int)left);
+            int pr = mnet_poll(client, (int)left);
             if (pr <= 0) break;
 
             ssize_t n = mnet_recv(client, buffer + used,

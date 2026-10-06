@@ -186,7 +186,7 @@ ssize_t mnet_send(
         socket,
         (const char *)data,
         (int)length,
-        SO_NOSIGPIPE
+        0
     );
 #else
     return (ssize_t)send(

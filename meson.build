@@ -141,9 +141,9 @@ test_security = executable('test_security',
 test('mnet_security_tests', test_security)
 
 # Install headers (libraries are installed by default)
-install_headers('include/mnet.h', 'include/mnet_app.h', 'include/mnet_request.h',
-    'include/mnet_response.h', 'include/mnet_router.h', 'include/mnet_socket.h',
-    'include/mnet_compat.h',
+install_headers('include/mnet/mnet.h', 'include/mnet/mnet_app.h', 'include/mnet/mnet_request.h',
+    'include/mnet/mnet_response.h', 'include/mnet/mnet_router.h', 'include/mnet/mnet_socket.h',
+    'include/mnet/mnet_compat.h',
     subdir: 'mnet')
 
 # pkg-config

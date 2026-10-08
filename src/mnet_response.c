@@ -112,21 +112,6 @@ size_t mnet_json_escape(
     const char *s)
 {
     if (s == NULL) s = "";
-    size_t len = 0;
-    for (const char *p = s; *p; p++) {
-        switch (*p) {
-            case '"':  len += 2; break;
-            case '\\': len += 2; break;
-            case '\n': len += 2; break;
-            case '\r': len += 2; break;
-            case '\t': len += 2; break;
-            default:
-                if ((unsigned char)*p < 0x20) len += 6; /* \uXXXX */
-                else len += 1;
-                break;
-        }
-    }
-    /* account for trailing NUL */
     if (out_size == 0) return 0;
 
     size_t pos = 0;

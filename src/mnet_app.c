@@ -52,7 +52,10 @@ static int64_t now_ms_mono(void)
 }
 #endif
 
-/* poll() is not available on Windows. Use select() instead. */
+/* poll() is not available on Windows. Use select() instead. On Windows the
+   first argument (nfds) is ignored — it exists only for Berkeley socket
+   compatibility — so pass 0 rather than fd + 1 (fd is a SOCKET handle, and
+   casting it to int would both warn and risk truncation). */
 #ifdef _WIN32
 static int mnet_poll(mnet_socket_t fd, int timeout_ms)
 {
@@ -62,7 +65,7 @@ static int mnet_poll(mnet_socket_t fd, int timeout_ms)
     FD_SET(fd, &fds);
     tv.tv_sec = timeout_ms / 1000;
     tv.tv_usec = (timeout_ms % 1000) * 1000;
-    return select(fd + 1, &fds, NULL, NULL, &tv);
+    return select(0, &fds, NULL, NULL, &tv);
 }
 #else
 static int mnet_poll(int fd, int timeout_ms)
@@ -2200,7 +2203,12 @@ char *mnet_call(const char *url)
         struct timeval tv;
         tv.tv_sec = 30;
         tv.tv_usec = 0;
+#ifdef _WIN32
+        /* Windows setsockopt takes optval as const char *. */
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+#else
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
     }
 
     /* Build and send the HTTP request */

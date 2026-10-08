@@ -36,6 +36,7 @@ example/example_combined
 
 # User-compiled binaries
 myapp
+test_welcome
 
 # OS
 .DS_Store

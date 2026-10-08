@@ -94,6 +94,18 @@ void mnet_use(mnet_app_t *app, mnet_middleware_t middleware);
 void mnet_static(mnet_app_t *app, const char *url_prefix,
     const char *fs_path);
 
+/* Set HTTPS mode.
+ * If enabled, the server will serve HTTPS (requires certificate and key).
+ * The welcome page will show the current HTTPS state.
+ */
+void mnet_set_https(mnet_app_t *app, int enabled);
+
+/* Set development mode.
+ * When enabled, a welcome page is shown when no routes are defined,
+ * displaying the server's development state and HTTPS state.
+ */
+void mnet_set_dev_mode(mnet_app_t *app, int enabled);
+
 /* Socket read/write timeout in seconds for client connections.
  * A bounded timeout is what stops a client from holding a connection open
  * forever without sending anything (Slowloris). The default is 30 seconds.

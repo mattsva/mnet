@@ -114,6 +114,9 @@ struct mnet_app {
      */
     volatile sig_atomic_t running;
     int debug;
+    int dev;
+    int https;
+    int port; /* listening port, set by mnet_run() */
     mnet_response_t (*not_found_handler)(mnet_request_t *req);
     mnet_middleware_t middleware;
     int timeout_seconds;
@@ -1073,6 +1076,98 @@ static int parse_request(mnet_socket_t client, const char *buffer,
     return MNET_PARSE_OK;
 }
 
+static mnet_response_t welcome_response(mnet_app_t *app)
+{
+    /* Welcome page shown when dev mode is enabled and no routes are defined. */
+    static const char *welcome_html =
+        "<!DOCTYPE html>\n"
+        "<html>\n"
+        "<head><title>mnet Server</title></head>\n"
+        "<body>\n"
+        "<h1>Congratulations!</h1>\n"
+        "<p>You successfully started the mnet server.</p>\n"
+        "<p>Go to <a href=\"https://github.com/mattsva/mnet/blob/main/README.md\">\n"
+        "README.md</a> for more information about MNET.</p>\n"
+        "<p>Go to <a href=\"https://github.com/mattsva/mnet/blob/main/docs/clib.md\">\n"
+        "clib.md</a> for further setup.</p>\n"
+        "<p>Development state: %s</p>\n"
+        "<p>Current https state: %s</p>\n"
+        "<p>Listening port: %d</p>\n"
+        "<p>Debug mode: %s</p>\n"
+        "<p>Worker count: %d</p>\n"
+        "<p>Max connections: %d</p>\n"
+        "<p>Timeout: %d seconds</p>\n"
+        "<p>Keep-alive timeout: %d seconds</p>\n"
+        "<p>Max body size: %zu bytes</p>\n"
+        "<p>Routes defined: %zu</p>\n"
+        "<p>Build time: %s</p>\n"
+        "<p>Git commit: <code>%12s</code></p>\n"
+        "</body>\n"
+        "</html>";
+
+    char dev_state[8];
+    snprintf(dev_state, sizeof(dev_state), "%s", app->dev ? "true" : "false");
+
+    char https_state[8];
+    snprintf(https_state, sizeof(https_state), "%s",
+        app->https ? "https" : "http");
+
+    /* Build a simple HTML page with all the info.
+       The body is allocated with malloc() and must be freed by the caller. */
+    size_t total_len = strlen(welcome_html) + strlen(dev_state) +
+                       strlen(https_state) + 512;
+    char *body = malloc(total_len);
+    if (body == NULL) {
+        return mnet_error(500, "internal server error");
+    }
+
+    /* Get current time */
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    char time_str[64];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S %Z", tm);
+
+    /* Get git commit hash */
+    char commit_hash[13] = "unknown";
+    FILE *fp = fopen(".git/HEAD", "r");
+    if (fp != NULL) {
+        char line[256];
+        if (fgets(line, sizeof(line), fp) != NULL) {
+            /* Remove newline */
+            line[strcspn(line, "\n")] = 0;
+            /* Extract hash from ref: ref: refs/heads/main */
+            if (strncmp(line, "ref:", 4) == 0) {
+                char *hash = line + 4;
+                while (*hash == ' ' || *hash == '\t') hash++;
+                strncpy(commit_hash, hash, 12);
+                commit_hash[12] = '\0';
+            } else {
+                /* Direct hash (unborn branch) */
+                strncpy(commit_hash, line, 12);
+                commit_hash[12] = '\0';
+            }
+        }
+        fclose(fp);
+    }
+
+    int written = snprintf(body, total_len, welcome_html,
+        dev_state, https_state, app->port,
+        app->debug ? "true" : "false",
+        app->workers, app->max_connections,
+        app->timeout_seconds, app->keep_alive_timeout,
+        app->max_body_size, app->route_count,
+        time_str, commit_hash);
+
+    mnet_response_t r;
+    r.status = 200;
+    r.content_type = "text/html";
+    r.body = body;
+    r.body_length = (size_t)written;
+    r.chunked = 0;
+
+    return r;
+}
+
 static mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
     const char **param_values, size_t max_params, size_t *out_param_count)
 {
@@ -1081,6 +1176,16 @@ static mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
         parsed->path_only, param_values, max_params, &param_count);
 
     *out_param_count = param_count;
+
+    /* If dev mode is enabled and no routes are defined, serve the welcome page
+       only for the root path ("/") and "/index.html". */
+    if (app->route_count == 0 && app->dev) {
+        if (strcmp(parsed->path_only, "/") == 0 ||
+            strcmp(parsed->path_only, "/index.html") == 0) {
+            return welcome_response(app);
+        }
+        return mnet_error(404, "not found");
+    }
 
     if (route == NULL) {
         if (app->not_found_handler) {
@@ -1597,6 +1702,16 @@ void mnet_set_log_handler(mnet_app_t *app, mnet_log_handler_t handler)
     if (app != NULL) app->log_handler = handler;
 }
 
+void mnet_set_https(mnet_app_t *app, int enabled)
+{
+    if (app != NULL) app->https = enabled;
+}
+
+void mnet_set_dev_mode(mnet_app_t *app, int enabled)
+{
+    if (app != NULL) app->dev = enabled;
+}
+
 void mnet_set_max_connections(mnet_app_t *app, int max_connections)
 {
     if (app != NULL) app->max_connections = max_connections;
@@ -1687,6 +1802,8 @@ int mnet_run(mnet_app_t *app, uint16_t port)
 #endif
 
     g_running_app = app;
+
+    app->port = port;
 
     mnet_socket_t server = mnet_tcp_listen(port, MNET_LISTEN_BACKLOG);
     if (server == MNET_INVALID_SOCKET) {

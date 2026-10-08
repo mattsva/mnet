@@ -50,6 +50,8 @@ help:
 	@echo "  make build FILE=prog SRC=main.c     Build a single C program linked with mnet"
 	@echo "  make build FILE=prog                Build a binary; SRC must be provided"
 	@echo ""
+	@echo "  make run EXAMPLE=example_http_server PORT=8080  Build + run an example"
+	@echo ""
 	@echo "  make examples                       Build all example programs"
 	@echo ""
 	@echo "  make test                           Build and run the full test suite"
@@ -122,6 +124,18 @@ test_client: $(SRCS) test/test_client.c
 
 test_welcome: $(SRCS) test/test_welcome.c
 	$(CC) $(CFLAGS) -Isrc $(SRCS) test/test_welcome.c -o $@ $(LDFLAGS)
+
+# ---- Run the examples (build + run) ----
+# Usage: make run EXAMPLE=example_http_server PORT=8080
+#   EXAMPLE  Example binary to build and run (default: example_http_server)
+#   PORT     Port to listen on (default: 8080)
+.PHONY: run
+run:
+	@echo "Starting mnet server..."
+	@if [ -z "$(EXAMPLE)" ]; then EXAMPLE=example_http_server; fi
+	@if [ -z "$(PORT)" ]; then PORT=8080; fi
+	$(MAKE) examples
+	./$(EXAMPLE) $(PORT)
 
 # ---- Clean ----
 

@@ -13,9 +13,9 @@
  *       src/mnet_request.c src/mnet_router.c test/test_features.c -o test_features
  */
 #define _GNU_SOURCE
-#include <mnet.h>
-#include <mnet_app.h>
-#include <mnet_router.h>
+#include <mnet/mnet.h>
+#include <mnet/mnet_app.h>
+#include <mnet/mnet_router.h>
 
 #include <stdio.h>
 #include <stdlib.h>

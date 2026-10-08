@@ -15,9 +15,9 @@
  * The socket parts are POSIX-only; on Windows this compiles to a no-op.
  */
 #define _GNU_SOURCE
-#include <mnet.h>
-#include <mnet_app.h>
-#include <mnet_router.h>
+#include <mnet/mnet.h>
+#include <mnet/mnet_app.h>
+#include <mnet/mnet_router.h>
 
 #include <stdio.h>
 #include <stdlib.h>

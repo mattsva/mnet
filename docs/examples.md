@@ -17,7 +17,7 @@ The basic HTTP server example serves a simple HTML page with links to other
 routes.
 
 ```c
-#include <mnet.h>
+#include <mnet/mnet.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -132,7 +132,7 @@ Visit `http://localhost:8080/` to see the home page.
 The REST API server example demonstrates a JSON API with CRUD operations.
 
 ```c
-#include <mnet.h>
+#include <mnet/mnet.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -276,7 +276,7 @@ curl http://localhost:8080/api/search?q=One
 The combined example serves both HTML pages and a JSON API.
 
 ```c
-#include <mnet.h>
+#include <mnet/mnet.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -525,7 +525,7 @@ int main(void)
 ## Example: client-side HTTP with MNET_CALL
 
 ```c
-#include <mnet.h>
+#include <mnet/mnet.h>
 
 MNET_HANDLER(fetch_google)
 {

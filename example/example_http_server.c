@@ -1,4 +1,4 @@
-#include <mnet.h>
+#include <mnet/mnet.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>

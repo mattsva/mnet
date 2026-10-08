@@ -7,11 +7,11 @@
  *       test/test_mnet.c -o test_mnet
  */
 
-#include <mnet.h>
-#include <mnet_response.h>
-#include <mnet_request.h>
-#include <mnet_router.h>
-#include <mnet_app.h>
+#include <mnet/mnet.h>
+#include <mnet/mnet_response.h>
+#include <mnet/mnet_request.h>
+#include <mnet/mnet_router.h>
+#include <mnet/mnet_app.h>
 
 #include <assert.h>
 #include <stdio.h>

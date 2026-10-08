@@ -16,7 +16,7 @@
  * Nothing here is part of the library: it is example scaffolding only.
  */
 
-#include <mnet.h>
+#include <mnet/mnet.h>
 #include <stdio.h>
 
 /*

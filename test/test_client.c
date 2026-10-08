@@ -9,8 +9,8 @@
  */
 
 #define _GNU_SOURCE
-#include <mnet.h>
-#include <mnet_app.h>
+#include <mnet/mnet.h>
+#include <mnet/mnet_app.h>
 
 #include <assert.h>
 #include <stdio.h>

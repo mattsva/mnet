@@ -71,15 +71,12 @@ static void test_jsonf(void)
 {
     mnet_response_t r;
 
-#define TRACE(msg) do { fprintf(stderr, "[jsonf] %s\n", (msg)); fflush(stderr); } while (0)
 
-    TRACE("start");
     /* A precision on %s must not skip escaping (previously it was passed
        straight to vsnprintf, which allowed breaking out of the string). */
     CHECK(body_is(fmt_str("{\"a\":\"%.40s\"}", "x\",\"admin\":true,\"y\":\""),
         "{\"a\":\"x\\\",\\\"admin\\\":true,\\\"y\\\":\\\"\"}"),
         "jsonf: %.Ns escapes quotes (no JSON injection)");
-    TRACE("after %.40s");
 
     CHECK(body_is(fmt_str("{\"a\":\"%.3s\"}", "abcdef"), "{\"a\":\"abc\"}"),
         "jsonf: %.Ns truncates the source");
@@ -108,7 +105,6 @@ static void test_jsonf(void)
     CHECK(is_rejected(mnet_jsonf("%a", 1.0)), "jsonf: %a is rejected");
     CHECK(is_rejected(mnet_jsonf("%123456d", 1)), "jsonf: absurd width is rejected");
     CHECK(is_rejected(mnet_jsonf(NULL)), "jsonf: NULL format is rejected");
-    TRACE("after reject-battery");
 
     /* %f of a huge double is 308 bytes: larger than the old 256-byte buffer,
        which made the old code copy 308 bytes out of a 256-byte array. */
@@ -121,16 +117,13 @@ static void test_jsonf(void)
 
     CHECK(body_is(mnet_jsonf("{\"d\":%.2f}", 3.14159), "{\"d\":3.14}"),
         "jsonf: %.2f");
-    TRACE("after %.2f");
     CHECK(body_is(mnet_jsonf("{\"d\":%g}", 0.5), "{\"d\":0.5}"), "jsonf: %g");
-    TRACE("after %g");
     CHECK(body_is(mnet_jsonf("{\"d\":%f}", NAN), "{\"d\":null}"),
         "jsonf: NaN becomes null (valid JSON)");
     CHECK(body_is(mnet_jsonf("{\"d\":%f}", INFINITY), "{\"d\":null}"),
         "jsonf: Inf becomes null (valid JSON)");
     CHECK(body_is(mnet_jsonf("{\"d\":%Lf}", (long double)1.5L), "{\"d\":1.500000}"),
         "jsonf: %Lf");
-    TRACE("after %Lf");
 
     CHECK(body_is(mnet_jsonf("{\"n\":%d}", -42), "{\"n\":-42}"), "jsonf: %d");
     CHECK(body_is(mnet_jsonf("{\"n\":%5d}", 42), "{\"n\":   42}"), "jsonf: %5d");
@@ -147,13 +140,11 @@ static void test_jsonf(void)
     CHECK(body_is(mnet_jsonf("{\"p\":\"100%%\"}"), "{\"p\":\"100%\"}"), "jsonf: %%");
     CHECK(body_is(fmt_str("{\"a\":\"%s\"}", NULL), "{\"a\":\"(null)\"}"),
         "jsonf: NULL %s argument");
-    TRACE("after NULL %s");
     CHECK(body_is(mnet_jsonf("{\"c\":\"%c\"}", 'z'), "{\"c\":\"z\"}"), "jsonf: %c");
     CHECK(body_is(mnet_jsonf("{\"c\":\"%c\"}", '"'), "{\"c\":\"\\\"\"}"),
         "jsonf: %c escapes a quote");
     CHECK(body_is(mnet_jsonf("{\"c\":\"%c\"}", 0), "{\"c\":\"\\u0000\"}"),
         "jsonf: %c with NUL");
-    TRACE("after %c battery");
 
     /* Mixed arguments must stay aligned: an earlier conversion must consume
        exactly its own argument. */
@@ -161,22 +152,17 @@ static void test_jsonf(void)
         "q\"", 9, 2.5, "wxyz"),
         "{\"a\":\"q\\\"\",\"n\":9,\"d\":2.5,\"b\":\"wx\"}"),
         "jsonf: mixed conversions stay aligned");
-    TRACE("after mixed conversions");
 
     {
         char big[100001];
 
         memset(big, 'a', sizeof(big) - 1);
         big[sizeof(big) - 1] = '\0';
-        TRACE("before 100KB %s");
         r = mnet_jsonf("{\"d\":\"%s\"}", big);
-        TRACE("after 100KB %s");
         CHECK(r.status == 200 && r.body_length == 6 + 100000 + 2,
             "jsonf: 100 KB string");
         mnet_response_free(&r);
     }
-    TRACE("jsonf done");
-#undef TRACE
 }
 
 /* ------------------------------------------------------------------ */

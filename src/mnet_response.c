@@ -576,42 +576,132 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
                 }
             }
 
-            /* Two-pass: get length, then allocate and format */
-            va_list args_copy;
-            va_copy(args_copy, args);
-            int vlen = vsnprintf(NULL, 0, spec, args_copy);
-            va_end(args_copy);
+            /*
+             * Consume the argument with va_arg into a correctly-typed value,
+             * then format that value. We must NOT pass the shared va_list to
+             * vsnprintf here: mixing manual va_arg() (used by the %s/%c paths
+             * above) with vsnprintf(va_list) on the same va_list is undefined
+             * and corrupts the list on the macOS and Windows variadic ABIs,
+             * which crashed the next conversion. Reading the value ourselves
+             * keeps every argument consumed through va_arg exactly once.
+             */
+            char conv = *p;
+            int is_float = strchr("fFeEgGaA", conv) != NULL;
+            char stack_val[64];
+            char *val = stack_val;
+            size_t val_cap = sizeof(stack_val);
+            int vlen = -1;
+            /* spec is a local copy; p points into the original format, so use
+               the conversion char's offset within spec, not p itself. */
+            const char *conv_in_spec = spec + spec_len - 1;
+
+            if (is_float) {
+                long double dv;
+                int has_L = strchr(spec, 'L') != NULL;
+                if (has_L) {
+                    dv = va_arg(args, long double);
+                } else {
+                    dv = (long double)va_arg(args, double);
+                }
+                /* Build a normalized long-double format from spec. */
+                char nspec[64];
+                size_t si = 0;
+                nspec[si++] = '%';
+                for (const char *q = spec + 1; q < conv_in_spec; q++) {
+                    if (*q == 'L') continue; /* we always use %L */
+                    nspec[si++] = *q;
+                }
+                nspec[si++] = 'L';
+                nspec[si++] = conv;
+                nspec[si] = '\0';
+                /* A huge double formats to hundreds of bytes; size first. */
+                int need = snprintf(NULL, 0, nspec, dv);
+                if (need < 0) need = 0;
+                if ((size_t)need + 1 > val_cap) {
+                    val = malloc((size_t)need + 1);
+                    val_cap = (size_t)need + 1;
+                    if (val == NULL) {
+                        free(buf);
+                        mnet_response_t r = {
+                            .status = 500,
+                            .content_type = "application/json",
+                            .body = strdup("null"),
+                            .body_length = 4,
+                        };
+                        return r;
+                    }
+                }
+                vlen = snprintf(val, val_cap, nspec, dv);
+            } else {
+                unsigned long long uv;
+                int is_signed = strchr("di", conv) != NULL;
+                /* Determine the length modifier present in the spec. */
+                int mod_l = strstr(spec, "ll") != NULL;
+                int mod_l1 = !mod_l && strchr(spec, 'l') != NULL;
+                int mod_h = strstr(spec, "hh") != NULL;
+                int mod_h1 = !mod_h && strchr(spec, 'h') != NULL;
+                int mod_z = strchr(spec, 'z') != NULL;
+                int mod_j = strchr(spec, 'j') != NULL;
+                int mod_t = strchr(spec, 't') != NULL;
+
+                /*
+                 * Normalize the format to the (un)signed long long we read into:
+                 * keep flags/width/precision, drop the original length modifier,
+                 * force "ll". This avoids a type mismatch between the spec's
+                 * modifier (e.g. %hhd, %zu) and the long long we pass.
+                 */
+                char nspec[64];
+                size_t si = 0;
+                nspec[si++] = '%';
+                for (const char *q = spec + 1; q < conv_in_spec; q++) {
+                    if (strchr("lhzjt", *q)) continue; /* drop length modifiers */
+                    nspec[si++] = *q;
+                }
+                nspec[si++] = 'l';
+                nspec[si++] = 'l';
+                nspec[si++] = conv;
+                nspec[si] = '\0';
+
+                if (is_signed) {
+                    long long sv;
+                    if (mod_l) sv = va_arg(args, long long);
+                    else if (mod_l1) sv = va_arg(args, long);
+                    else if (mod_h) sv = (signed char)va_arg(args, int);
+                    else if (mod_h1) sv = (short)va_arg(args, int);
+                    else if (mod_z) sv = (long long)va_arg(args, ssize_t);
+                    else if (mod_j) sv = va_arg(args, long long);
+                    else if (mod_t) sv = (long long)va_arg(args, ptrdiff_t);
+                    else sv = va_arg(args, int);
+                    vlen = snprintf(val, val_cap, nspec, sv);
+                    (void)uv;
+                } else {
+                    if (mod_l) uv = va_arg(args, unsigned long long);
+                    else if (mod_l1) uv = va_arg(args, unsigned long);
+                    else if (mod_h) uv = (unsigned char)va_arg(args, unsigned int);
+                    else if (mod_h1) uv = (unsigned short)va_arg(args, unsigned int);
+                    else if (mod_z) uv = va_arg(args, size_t);
+                    else if (mod_j) uv = va_arg(args, unsigned long long);
+                    else if (mod_t) uv = (unsigned long long)va_arg(args, ptrdiff_t);
+                    else uv = va_arg(args, unsigned int);
+                    vlen = snprintf(val, val_cap, nspec, uv);
+                }
+            }
 
             if (vlen > 0) {
                 size_t vlen_sz = (size_t)vlen;
-                char *val = malloc(vlen_sz + 1);
-                if (val == NULL) {
-                    free(buf);
-                    mnet_response_t r = {
-                        .status = 500,
-                        .content_type = "application/json",
-                        .body = strdup("null"),
-                        .body_length = 4,
-                    };
-                    return r;
-                }
-                vsnprintf(val, vlen_sz + 1, spec, args);
-
                 /* NaN and Inf are not valid JSON: replace with null */
-                if (strchr("fFeEgGaA", *p)) {
-                    if (strstr(val, "nan") || strstr(val, "inf") ||
-                        strstr(val, "NAN") || strstr(val, "INF")) {
-                        free(val);
-                        val = strdup("null");
-                        vlen_sz = 4;
-                    }
+                if (is_float &&
+                    (strstr(val, "nan") || strstr(val, "inf") ||
+                     strstr(val, "NAN") || strstr(val, "INF"))) {
+                    memcpy(val, "null", 5);
+                    vlen_sz = 4;
                 }
 
                 while (pos + vlen_sz + 1 >= cap) {
                     cap *= 2;
                     char *nb = realloc(buf, cap);
                     if (nb == NULL) {
-                        free(val);
+                        if (val != stack_val) free(val);
                         free(buf);
                         mnet_response_t r = {
                             .status = 500,
@@ -625,8 +715,8 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
                 }
                 memcpy(buf + pos, val, vlen_sz);
                 pos += vlen_sz;
-                free(val);
             }
+            if (val != stack_val) free(val);
         }
         f = p + 1; /* advance past conversion character */
     }

@@ -13,7 +13,7 @@
     {
       packages.${system}.default = pkgs.stdenv.mkDerivation {
         pname = "mnet";
-        version = "2.5.0";
+        version = "0.2.5";
         src = ./.;
         nativeBuildInputs = [ pkgs.cmake ];
         meta = with pkgs.lib; {

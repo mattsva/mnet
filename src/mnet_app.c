@@ -1089,9 +1089,9 @@ static mnet_response_t welcome_response(mnet_app_t *app)
         "<body>\n"
         "<h1>Congratulations!</h1>\n"
         "<p>You successfully started the mnet server.</p>\n"
-        "<p>Go to <a href=\"https://github.com/mattsva/mnet/blob/main/README.md\">\n"
+        "<p>Go to <a href=\"https://github.com/mnet-web/mnet/blob/main/README.md\">\n"
         "README.md</a> for more information about MNET.</p>\n"
-        "<p>Go to <a href=\"https://github.com/mattsva/mnet/blob/main/docs/clib.md\">\n"
+        "<p>Go to <a href=\"https://github.com/mnet-web/mnet/blob/main/docs/clib.md\">\n"
         "clib.md</a> for further setup.</p>\n"
         "<p>Development state: %s</p>\n"
         "<p>Current https state: %s</p>\n"
@@ -2225,7 +2225,7 @@ char *mnet_call(const char *url)
             req_len = snprintf(req, sizeof(req),
                 "GET %s HTTP/1.1\r\n"
                 "Host: %s\r\n"
-                "User-Agent: mnet/2.5.0\r\n"
+                "User-Agent: mnet/0.2.5\r\n"
                 "Accept: */*\r\n"
                 "Connection: close\r\n"
                 "\r\n",
@@ -2234,7 +2234,7 @@ char *mnet_call(const char *url)
             req_len = snprintf(req, sizeof(req),
                 "GET %s HTTP/1.1\r\n"
                 "Host: %s\r\n"
-                "User-Agent: mnet/2.5.0\r\n"
+                "User-Agent: mnet/0.2.5\r\n"
                 "Accept: */*\r\n"
                 "Connection: close\r\n"
                 "\r\n",

@@ -55,9 +55,9 @@ Content-Type: text/html
 <body>
   <h1>Congratulations!</h1>
   <p>You successfully started the mnet server.</p>
-  <p>Go to <a href="https://github.com/mattsva/mnet/blob/main/README.md">README.md</a>
+  <p>Go to <a href="https://github.com/mnet-web/mnet/blob/main/README.md">README.md</a>
      for more information about MNET.</p>
-  <p>Go to <a href="https://github.com/mattsva/mnet/blob/main/docs/clib.md">clib.md</a>
+  <p>Go to <a href="https://github.com/mnet-web/mnet/blob/main/docs/clib.md">clib.md</a>
      for further setup.</p>
   <p>Development state: true</p>
   <p>Current https state: https</p>

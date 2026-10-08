@@ -68,8 +68,12 @@ test_security: $(SRCS) test/test_security.c
 test_client: $(SRCS) test/test_client.c
 	$(CC) $(CFLAGS) -Isrc $(SRCS) test/test_client.c -o $@ $(LDFLAGS)
 
+test_welcome: $(SRCS) test/test_welcome.c
+	$(CC) $(CFLAGS) -Isrc $(SRCS) test/test_welcome.c -o $@ $(LDFLAGS)
+
 # Run tests (builds + runs)
-test: clean test_mnet test_http test_parser test_stress test_features test_security test_client
+test: clean test_mnet test_http test_parser test_stress test_features test_security test_client test_welcome
+	./test_welcome
 clean:
 	rm -f mnet-server test_mnet test_http test_parser test_stress test_features fuzz_http
 	rm -f example/example_http_server

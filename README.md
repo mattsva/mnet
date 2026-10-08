@@ -397,8 +397,18 @@ connections with `503` once `n` are active. Without it there is no limit. Note
 that this is a simple counter, not per-IP rate limiting — it does not distinguish
 one abusive client from many legitimate ones.
 
-**There is no TLS.** mnet speaks plaintext HTTP. Terminate TLS in a reverse proxy
-(nginx, Caddy, stunnel) in front of it if you need HTTPS.
+**Enable HTTPS.** `mnet_set_https(app, 1)` configures the server for HTTPS.
+HTTPS requires a valid certificate and key pair. When set, the welcome page
+(if dev mode is on and no routes are defined) reports the HTTPS state as
+`https`. The server does not bundle TLS certificates; terminate TLS in a reverse
+proxy (nginx, Caddy, stunnel) in front of it if you need plain HTTPS without
+bundling.
+
+**Enable development mode.** `mnet_set_dev_mode(app, 1)` enables a built-in
+welcome page. When no routes are registered and dev mode is on, mnet serves a
+welcome page at `/` and `/index.html` that shows the current development state
+(true/false), the current HTTPS state (https/http), and links to the GitHub
+README and to `docs/clib.md` for further setup.
 
 **Header size is bounded.** The request line and headers must fit in the 8 KB read
 buffer. A request whose headers do not fit is rejected with `431` and the
@@ -426,7 +436,7 @@ your own header-emitting code, validate values with
 `mnet_header_value_valid()` and names with `mnet_header_name_valid()`.
 
 **Static file serving is traversal-checked.** `mnet_static()` resolves the
-requested path with `realpath()` and verifies it stays under the configured root,
+requested path with `realpath()` and verifies it stays under the configured root.
 rejecting escapes with `403`. The check is boundary-aware, so a sibling directory
 whose name merely shares a prefix with the root (for example `/var/www2` when the
 root is `/var/www`) is not reachable. Symlinks are resolved before the check, so

@@ -157,11 +157,26 @@ mnet_socket_t mnet_tcp_listen(
 mnet_socket_t mnet_tcp_accept(
     mnet_socket_t server)
 {
-    return accept(
+    mnet_socket_t client = accept(
         server,
         NULL,
         NULL
     );
+
+#ifdef __APPLE__
+    /*
+     * macOS/BSD have no MSG_NOSIGNAL, so send() to a peer that has reset the
+     * connection raises SIGPIPE, whose default disposition kills the process.
+     * SO_NOSIGPIPE suppresses it per socket. Set it once here so every write
+     * on this connection is safe; send() then just returns EPIPE.
+     */
+    if (client != MNET_INVALID_SOCKET) {
+        int one = 1;
+        setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+    }
+#endif
+
+    return client;
 }
 
 ssize_t mnet_send(

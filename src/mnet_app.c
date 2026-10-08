@@ -1994,6 +1994,11 @@ static mnet_socket_t mnet_socket_connect(const char *host, uint16_t port)
         }
 
         if (connect(sock, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
+#ifdef __APPLE__
+            /* See mnet_tcp_accept: suppress SIGPIPE on this socket. */
+            int one = 1;
+            setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
             break;
         }
 
@@ -2094,7 +2099,7 @@ static int mnet_read_response(mnet_socket_t sock,
     int header_done = 0;
     int body_done = 0;
     int in_body = 0;
-    ssize_t n;
+    ssize_t n = 0;
 
     *out_body = NULL;
     *out_body_len = 0;

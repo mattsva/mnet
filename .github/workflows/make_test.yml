@@ -83,17 +83,11 @@ jobs:
         run: |
           CFLAGS="-std=c17 -Wall -Wextra -Wpedantic -Werror -g \
                   -fsanitize=address,undefined -fno-omit-frame-pointer \
-                  -D_POSIX_C_SOURCE=200112L -Iinclude -Isrc -pthread"
-          gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_response.c \
-              src/mnet_request.c src/mnet_router.c test/test_mnet.c -o test_mnet_asan
-          gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_response.c \
-              src/mnet_request.c src/mnet_router.c test/test_http.c -o test_http_asan
-          gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_response.c \
-              src/mnet_request.c src/mnet_router.c test/test_mnet_parser.c -o test_parser_asan
-          gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_response.c \
-              src/mnet_request.c src/mnet_router.c test/test_stress.c -o test_stress_asan
-          gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_response.c \
-              src/mnet_request.c src/mnet_router.c test/test_features.c -o test_features_asan
+                  -D_POSIX_C_SOURCE=200112L -Iinclude -Iinclude/mnet -Isrc -pthread"
+          for t in test_mnet test_http test_mnet_parser test_stress test_features test_security test_client test_welcome; do
+            gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_response.c \
+                src/mnet_request.c src/mnet_router.c test/$t.c -o ${t}_asan || exit 1
+          done
 
       - name: Run unit tests under ASan/UBSan
         run: ASAN_OPTIONS=detect_leaks=1 ./test_mnet_asan
@@ -102,13 +96,22 @@ jobs:
         run: ASAN_OPTIONS=detect_leaks=0 ./test_http_asan
 
       - name: Run parser and concurrency tests under ASan/UBSan
-        run: ASAN_OPTIONS=detect_leaks=0 ./test_parser_asan
+        run: ASAN_OPTIONS=detect_leaks=0 ./test_mnet_parser_asan
 
       - name: Run stress tests under ASan/UBSan
         run: ASAN_OPTIONS=detect_leaks=0 ./test_stress_asan
 
       - name: Run feature tests under ASan/UBSan
         run: ASAN_OPTIONS=detect_leaks=0 ./test_features_asan
+
+      - name: Run security tests under ASan/UBSan
+        run: ASAN_OPTIONS=detect_leaks=0 ./test_security_asan
+
+      - name: Run client tests under ASan/UBSan
+        run: ASAN_OPTIONS=detect_leaks=0 ./test_client_asan
+
+      - name: Run welcome tests under ASan/UBSan
+        run: ASAN_OPTIONS=detect_leaks=0 ./test_welcome_asan
 
   test-valgrind:
     runs-on: ubuntu-latest
@@ -120,7 +123,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y valgrind
 
       - name: Build tests
-        run: make test_mnet test_http test_parser test_stress test_features
+        run: make test_mnet test_http test_parser test_stress test_features test_security test_client test_welcome
 
       - name: Valgrind unit tests
         run: valgrind --leak-check=full --error-exitcode=1 ./test_mnet
@@ -137,6 +140,9 @@ jobs:
       - name: Valgrind feature tests
         run: valgrind --leak-check=full --error-exitcode=1 --trace-children=yes ./test_features
 
+      - name: Valgrind security tests
+        run: valgrind --leak-check=full --error-exitcode=1 --trace-children=yes ./test_security
+
   # The worker pool is the one part of the library that is only exercised with
   # threads, so run the concurrency tests under ThreadSanitizer too.
   test-tsan:
@@ -149,13 +155,13 @@ jobs:
         run: |
           gcc -std=c17 -Wall -Wextra -Wpedantic -Werror -g \
               -fsanitize=thread -D_POSIX_C_SOURCE=200112L \
-              -Iinclude -Isrc -pthread \
+              -Iinclude -Iinclude/mnet -Isrc -pthread \
               src/mnet.c src/mnet_app.c src/mnet_response.c \
               src/mnet_request.c src/mnet_router.c test/test_mnet_parser.c \
               -o test_parser_tsan
           gcc -std=c17 -Wall -Wextra -Wpedantic -Werror -g \
               -fsanitize=thread -D_POSIX_C_SOURCE=200112L \
-              -Iinclude -Isrc -pthread \
+              -Iinclude -Iinclude/mnet -Isrc -pthread \
               src/mnet.c src/mnet_app.c src/mnet_response.c \
               src/mnet_request.c src/mnet_router.c test/test_stress.c \
               -o test_stress_tsan

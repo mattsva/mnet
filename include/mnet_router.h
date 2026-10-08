@@ -15,10 +15,6 @@ typedef enum {
     MNET_HTTP_OPTIONS
 } mnet_http_method_t;
 
-typedef void (*mnet_handler_legacy_t)(
-    mnet_request_t *request,
-    mnet_response_t *response);
-
 typedef mnet_response_t (*mnet_handler_t)(
     mnet_request_t *req);
 
@@ -26,7 +22,6 @@ typedef struct mnet_route {
     mnet_http_method_t method;
     const char *path;
     mnet_handler_t handler;
-    mnet_handler_legacy_t legacy_handler; /* old-style, or NULL */
     /* Extracted parameter names for this route, NULL-terminated */
     const char **param_names;
     void *user_data;

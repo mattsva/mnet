@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(mnet VERSION 0.2.0 LANGUAGES C)
+project(mnet VERSION 2.5.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -44,12 +44,12 @@ set(MNET_SOURCES
 
 # Static library
 add_library(mnet_static STATIC ${MNET_SOURCES})
-target_include_directories(mnet_static PUBLIC include)
+target_include_directories(mnet_static PUBLIC include PRIVATE include/mnet)
 set_target_properties(mnet_static PROPERTIES OUTPUT_NAME mnet)
 
 # Shared library
 add_library(mnet_shared SHARED ${MNET_SOURCES})
-target_include_directories(mnet_shared PUBLIC include)
+target_include_directories(mnet_shared PUBLIC include PRIVATE include/mnet)
 set_target_properties(mnet_shared PROPERTIES
     OUTPUT_NAME mnet
     VERSION ${PROJECT_VERSION}

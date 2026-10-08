@@ -397,12 +397,9 @@ connections with `503` once `n` are active. Without it there is no limit. Note
 that this is a simple counter, not per-IP rate limiting — it does not distinguish
 one abusive client from many legitimate ones.
 
-**Enable HTTPS.** `mnet_set_https(app, 1)` configures the server for HTTPS.
-HTTPS requires a valid certificate and key pair. When set, the welcome page
-(if dev mode is on and no routes are defined) reports the HTTPS state as
-`https`. The server does not bundle TLS certificates; terminate TLS in a reverse
-proxy (nginx, Caddy, stunnel) in front of it if you need plain HTTPS without
-bundling.
+**HTTPS is not implemented.** The `mnet_set_https(app, 1)` flag only controls
+the HTTPS state reported on the welcome page; it does not add TLS. Terminate TLS
+in a reverse proxy (nginx, Caddy, stunnel) in front of mnet.
 
 **Enable development mode.** `mnet_set_dev_mode(app, 1)` enables a built-in
 welcome page. When no routes are registered and dev mode is on, mnet serves a

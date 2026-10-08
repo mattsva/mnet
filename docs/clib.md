@@ -30,12 +30,12 @@ If any routes are defined, the welcome page is NOT shown, and the server behaves
 ### Example
 
 ```c
-#include <mnet.h>
+#include <mnet/mnet.h>
 
 int main(void) {
     mnet_app_t *app = mnet_create();
     mnet_set_dev_mode(app, 1);   // Enable welcome page
-    mnet_set_https(app, 1);      // Enable HTTPS
+    mnet_set_https(app, 1);      // Report HTTPS state on welcome page
     mnet_set_workers(app, 4);    // Worker pool
     mnet_run(app, 8080);
     mnet_destroy(app);
@@ -114,13 +114,14 @@ static mnet_response_t hello_handler(mnet_request_t *req) {
 | `mnet_set_keep_alive_timeout(app, s)` | Keep-alive timeout in seconds |
 | `mnet_set_max_body_size(app, bytes)` | Maximum request body size |
 | `mnet_set_timeout(app, s)` | Socket read/write timeout in seconds |
-| `mnet_set_https(app, 1)` | Enable HTTPS |
+| `mnet_set_https(app, 1)` | Report HTTPS state on welcome page (no TLS) |
 | `mnet_set_dev_mode(app, 1)` | Enable welcome page when no routes defined |
 
 ## HTTPS Support
 
-mnet supports HTTPS via the `mnet_set_https(app, 1)` configuration.
-The server needs a valid certificate and key pair.
+mnet does not implement TLS. The `mnet_set_https(app, 1)` flag only controls
+the HTTPS state reported on the welcome page. Terminate TLS in a reverse proxy
+(nginx, Caddy, stunnel) in front of mnet.
 
 ## Memory Safety
 

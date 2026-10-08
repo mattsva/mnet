@@ -2212,7 +2212,7 @@ char *mnet_call(const char *url)
             req_len = snprintf(req, sizeof(req),
                 "GET %s HTTP/1.1\r\n"
                 "Host: %s\r\n"
-                "User-Agent: mnet/0.2.0\r\n"
+                "User-Agent: mnet/2.5.0\r\n"
                 "Accept: */*\r\n"
                 "Connection: close\r\n"
                 "\r\n",
@@ -2221,7 +2221,7 @@ char *mnet_call(const char *url)
             req_len = snprintf(req, sizeof(req),
                 "GET %s HTTP/1.1\r\n"
                 "Host: %s\r\n"
-                "User-Agent: mnet/0.2.0\r\n"
+                "User-Agent: mnet/2.5.0\r\n"
                 "Accept: */*\r\n"
                 "Connection: close\r\n"
                 "\r\n",
@@ -2287,16 +2287,6 @@ void mnet_call_async(const char *url, void (*callback)(char *body))
     body = mnet_call(url);
     callback(body);
     free(body);
-}
-
-/* ---------------------------------------------------------------------------
- * Configuration helpers
- * --------------------------------------------------------------------------- */
-void mnet_set_req_body_limit(mnet_app_t *app, size_t limit)
-{
-    if (app != NULL) {
-        app->max_body_size = limit;
-    }
 }
 
 /* ---------------------------------------------------------------------------

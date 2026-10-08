@@ -127,7 +127,7 @@ size_t mnet_json_escape(
         }
     }
     /* account for trailing NUL */
-    if (out_size == 0) return len;
+    if (out_size == 0) return 0;
 
     size_t pos = 0;
     for (const char *p = s; *p && pos < out_size - 1; p++) {
@@ -174,7 +174,7 @@ size_t mnet_json_escape(
         }
     }
     out[pos] = '\0';
-    return len;
+    return pos;
 }
 
 mnet_response_t mnet_text(const char *text)

@@ -74,6 +74,15 @@ int mnet_header_value_valid(const char *value);
  */
 int mnet_header_name_valid(const char *name);
 
+/*
+ * Escape a string for safe inclusion in JSON.
+ *
+ * Writes the escaped form of s into out, never exceeding out_size bytes
+ * including the terminating NUL. Returns the number of bytes written
+ * (excluding the NUL), which may be less than the fully escaped length
+ * when out_size is too small — the output is always NUL-terminated and
+ * never overflows.
+ */
 size_t mnet_json_escape(
     char *out,
     size_t out_size,

@@ -1,5 +1,5 @@
 project('mnet', 'c',
-    version: '0.2.0',
+    version: '2.5.0',
     default_options: ['c_std=c17'],
 )
 
@@ -52,18 +52,19 @@ mnet_sources = files(
 
 # Include directories
 mnet_inc = include_directories('include')
+mnet_priv_inc = include_directories('include/mnet')
 
 # Static library
 mnet_static = static_library('mnet',
     mnet_sources,
-    include_directories: mnet_inc,
+    include_directories: [mnet_inc, mnet_priv_inc],
     dependencies: thread_dep,
 )
 
 # Shared library
 mnet_shared = shared_library('mnet',
     mnet_sources,
-    include_directories: mnet_inc,
+    include_directories: [mnet_inc, mnet_priv_inc],
     dependencies: thread_dep,
     version: meson.project_version(),
     soversion: '1',

@@ -147,7 +147,4 @@ char *mnet_call(const char *url);
  * is freed automatically after the callback returns. */
 void mnet_call_async(const char *url, void (*callback)(char *body));
 
-/* Memory allocation limit for request bodies (bytes). 0 = default (16 MB). */
-void mnet_set_req_body_limit(mnet_app_t *app, size_t limit);
-
 #endif

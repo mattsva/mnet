@@ -17,7 +17,7 @@
 
 CC      = gcc
 CFLAGS  = -std=c17 -Wall -Wextra -Wpedantic -Werror \
-          -D_POSIX_C_SOURCE=200112L -Iinclude
+          -D_POSIX_C_SOURCE=200112L -Iinclude/mnet -Iinclude
 LDFLAGS =
 
 ifeq ($(shell uname -s),Darwin)
@@ -36,8 +36,29 @@ endif
 SRCS    = src/mnet.c src/mnet_app.c src/mnet_response.c \
           src/mnet_request.c src/mnet_router.c
 
+TEST_SRCS = test/test_mnet.c test/test_http.c test/test_mnet_parser.c \
+            test/test_stress.c test/test_features.c test/test_security.c \
+            test/test_client.c test/test_welcome.c
+
+TEST_BINS = test_mnet test_http test_parser test_stress test_features \
+            test_security test_client test_welcome
+
 # Default target: build everything
-all: examples
+all: lib libmnet.a libmnet.so examples
+
+# ---- Library ----
+
+lib:
+	@mkdir -p lib
+
+libmnet.a: $(SRCS)
+	@rm -f *.o
+	$(CC) $(CFLAGS) -Isrc -c $(SRCS)
+	ar rcs $@ *.o
+	@rm -f *.o
+
+libmnet.so: $(SRCS)
+	$(CC) $(CFLAGS) -fPIC -Isrc $(SRCS) -shared -o $@ $(LDFLAGS)
 
 # ---- Help ----
 
@@ -49,6 +70,9 @@ help:
 	@echo ""
 	@echo "  make build FILE=prog SRC=main.c     Build a single C program linked with mnet"
 	@echo "  make build FILE=prog                Build a binary; SRC must be provided"
+	@echo ""
+	@echo "  make libmnet.a                      Build the static library"
+	@echo "  make libmnet.so                     Build the shared library"
 	@echo ""
 	@echo "  make run EXAMPLE=example_http_server PORT=8080  Build + run an example"
 	@echo ""
@@ -90,16 +114,20 @@ build:
 		echo "Usage: make build FILE=prog SRC=main.c [SRCS=...]"; \
 		exit 1; \
 	fi; \
-	if [ -z "$(SRCS)" ]; then \
-		SRCS='src/mnet.c src/mnet_app.c src/mnet_response.c src/mnet_request.c src/mnet_router.c'; \
-	fi; \
-	$(CC) $(CFLAGS) $(SRCS) $(SRC) -o $(FILE) $(LDFLAGS)
+	$(MAKE) libmnet.a; \
+	$(CC) $(CFLAGS) $(SRC) libmnet.a -o $(FILE) $(LDFLAGS)
 
 # ---- Tests ----
 
 .PHONY: test
-test: clean test_mnet test_http test_parser test_stress test_features test_security test_client test_welcome
-	./test_welcome
+test: clean $(TEST_BINS)
+	@fail=0; \
+	for t in $(TEST_BINS); do \
+		echo "=== $$t ==="; \
+		if ! ./$$t; then fail=1; fi; \
+	done; \
+	if [ $$fail -ne 0 ]; then echo "SOME TESTS FAILED"; exit 1; fi; \
+	echo "ALL TESTS PASSED"
 
 test_mnet: $(SRCS) test/test_mnet.c
 	$(CC) $(CFLAGS) -Itest $(SRCS) test/test_mnet.c -o $@ $(LDFLAGS)
@@ -141,7 +169,9 @@ run:
 
 .PHONY: clean
 clean:
-	rm -f mnet-server test_mnet test_http test_parser test_stress test_features test_security test_client test_welcome
+	rm -f libmnet.a libmnet.so libmnet.o
+	rm -rf lib
+	rm -f $(TEST_BINS)
 	rm -f example/example_http_server
 	rm -f example/example_api_server
 	rm -f example/example_combined

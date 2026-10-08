@@ -62,18 +62,31 @@ sudo meson install -C build
 
 ## Installing via package manager
 
-mnet is available in the following package managers:
+mnet is **not** available in any package manager. Build from source instead.
 
-### Nixpkgs
+### From source (make)
 
 ```sh
-nix-env -i mnet
+make
+sudo make install
 ```
 
-### Homebrew (macOS)
+### Linking against mnet
+
+After building, you can link against the static or shared library:
 
 ```sh
-brew install mnet
+# Static library
+gcc -Iinclude myapp.c build/libmnet.a -o myapp
+
+# Shared library
+gcc -Iinclude myapp.c -Lbuild -lmnet -o myapp
+```
+
+Or use pkg-config (if installed):
+
+```sh
+gcc $(pkg-config --cflags --libs mnet) myapp.c -o myapp
 ```
 
 ## Linking against mnet

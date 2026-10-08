@@ -1177,9 +1177,9 @@ static mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
 
     *out_param_count = param_count;
 
-    /* If dev mode is enabled and no routes are defined, serve the welcome page
-       only for the root path ("/") and "/index.html". */
-    if (app->route_count == 0 && app->dev) {
+    /* If no routes are defined, serve the welcome page
+       for the root path ("/") and "/index.html". */
+    if (app->route_count == 0) {
         if (strcmp(parsed->path_only, "/") == 0 ||
             strcmp(parsed->path_only, "/index.html") == 0) {
             return welcome_response(app);

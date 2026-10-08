@@ -48,15 +48,15 @@ static void test_mnet_call_invalid_url(void)
 
     /* NULL URL */
     result = mnet_call(NULL);
-    assert(result == NULL);
+    CHECK(result == NULL, "mnet_call(NULL) returns NULL");
 
     /* Empty URL */
     result = mnet_call("");
-    assert(result == NULL);
+    CHECK(result == NULL, "mnet_call(\"\") returns NULL");
 
     /* URL with no host */
     result = mnet_call("://invalid");
-    assert(result == NULL);
+    CHECK(result == NULL, "mnet_call(\"://invalid\") returns NULL");
 
     printf("  PASS test_mnet_call_invalid_url\n");
 }
@@ -71,6 +71,7 @@ static void test_mnet_call_sync_async(void)
 {
     /* Verify that mnet_call and mnet_call_async are declared and callable */
     char *body1 = mnet_call("https://example.com");
+    CHECK(body1 != NULL, "mnet_call returns non-NULL for valid URL");
     if (body1 != NULL) {
         free(body1);
     }

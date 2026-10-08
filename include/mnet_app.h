@@ -58,41 +58,43 @@ int mnet_route(
 #define MNET_HANDLER(name) \
     static mnet_response_t name(mnet_request_t *req)
 
+/* Set the log callback. Without one, messages go to stderr. */
+void mnet_set_log_handler(mnet_app_t *app, mnet_log_handler_t handler);
+
+/* Set the not-found handler called when no route matches a request.
+ * The handler receives the request and must return a response. If NULL, a
+ * default 404 page is sent. */
+void mnet_set_not_found_handler(mnet_app_t *app,
+    mnet_response_t (*handler)(mnet_request_t *req));
+
+/* Enable or disable debug logging for the application.
+ * When enabled, each request is logged to stderr with the status code,
+ * method, and path. This is only useful when the server is not running
+ * at full production capacity. */
 void mnet_set_debug(mnet_app_t *app, int enabled);
 
-void mnet_set_not_found_handler(mnet_app_t *app, mnet_response_t (*handler)(mnet_request_t *req));
-
+/* Middleware: called for every request, can wrap the handler's response.
+ * The middleware receives the request and a callback to the next handler,
+ * and must return a response. It can modify the response or short-circuit
+ * the request by returning a different response. */
 void mnet_use(mnet_app_t *app, mnet_middleware_t middleware);
 
-/*
- * Serve static files from fs_path under url_prefix, e.g.
- *
+/* Serve static files from fs_path under url_prefix, e.g.
  *     mnet_static(app, "/static", "/var/www");
- *
  * Path resolution:
  *   The configured root and the requested path are both resolved with
  *   realpath() (POSIX) / _fullpath() (Windows) before the file is opened, so
- *   "..", "." and symlinks are all collapsed to a canonical absolute path. The
- *   resolved target must equal the resolved root or lie beneath it, compared on
- *   a path-separator boundary so that a sibling such as /var/www2 is not
- *   accepted as being inside /var/www. Anything else is refused with 403 and a
- *   traversal attempt is logged. A path that cannot be resolved (including a
- *   missing file) yields 404.
- *
- *   Because the check happens on the resolved path and the file is opened by
- *   that resolved path, a symlink that leaves the root is rejected too.
+ *   "..", ".", and symlinks are all collapsed to a canonical absolute path.
+ *   The resolved target must equal the resolved root or lie beneath it,
+ *   compared on a path-separator boundary so that a sibling such as
+ *   /var/www2 is not accepted as being inside /var/www. Anything else is
+ *   refused with 403 and a traversal attempt is logged. A path that cannot
+ *   be resolved (including a missing file) yields 404.
  */
 void mnet_static(mnet_app_t *app, const char *url_prefix,
     const char *fs_path);
 
-/*
- * Set the log callback. Without one, messages go to stderr.
- */
-void mnet_set_log_handler(mnet_app_t *app, mnet_log_handler_t handler);
-
-/*
- * Socket read/write timeout in seconds for client connections.
- *
+/* Socket read/write timeout in seconds for client connections.
  * A bounded timeout is what stops a client from holding a connection open
  * forever without sending anything (Slowloris). The default is 30 seconds.
  * Passing 0 restores that default; passing a negative value disables the
@@ -102,14 +104,11 @@ void mnet_set_log_handler(mnet_app_t *app, mnet_log_handler_t handler);
  */
 void mnet_set_timeout(mnet_app_t *app, int seconds);
 
-/*
- * Number of worker threads.
- *
+/* Number of worker threads.
  * The server is threaded by default (4 workers); this sets the pool size.
  * Pass 1 to run the single-threaded blocking loop, which has no
  * synchronisation overhead but handles one connection at a time, or 0 to
  * restore the default. Values are clamped to a sane range.
- *
  * With more than one worker, handlers run concurrently, so any state they
  * share must be synchronised by the application.
  */
@@ -135,12 +134,6 @@ char *mnet_call(const char *url);
  * the response body (or NULL on failure) on the caller's thread. The response
  * is freed automatically after the callback returns. */
 void mnet_call_async(const char *url, void (*callback)(char *body));
-
-/* Set the number of worker threads. 0 = default (4), 1 = single-threaded. */
-void mnet_set_workers(mnet_app_t *app, int workers);
-
-/* Maximum number of concurrent connections. 0 = unlimited (default). */
-void mnet_set_max_connections(mnet_app_t *app, int max_connections);
 
 /* Memory allocation limit for request bodies (bytes). 0 = default (16 MB). */
 void mnet_set_req_body_limit(mnet_app_t *app, size_t limit);

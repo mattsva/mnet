@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "mnet_response.h"
+#include "mnet_compat.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -596,42 +597,64 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
             const char *conv_in_spec = spec + spec_len - 1;
 
             if (is_float) {
-                long double dv;
-                int has_L = strchr(spec, 'L') != NULL;
-                if (has_L) {
-                    dv = va_arg(args, long double);
-                } else {
-                    dv = (long double)va_arg(args, double);
-                }
-                /* Build a normalized long-double format from spec. */
+                /*
+                 * Format the value with its own width: promote to long double
+                 * only when the caller used %L (matching the type read). For a
+                 * plain %f the argument is a double; formatting it directly
+                 * avoids a double->long double promotion that misrenders
+                 * infinity under some FP environments.
+                 */
                 char nspec[64];
                 size_t si = 0;
-                nspec[si++] = '%';
-                for (const char *q = spec + 1; q < conv_in_spec; q++) {
-                    if (*q == 'L') continue; /* we always use %L */
-                    nspec[si++] = *q;
-                }
-                nspec[si++] = 'L';
-                nspec[si++] = conv;
-                nspec[si] = '\0';
-                /* A huge double formats to hundreds of bytes; size first. */
-                int need = snprintf(NULL, 0, nspec, dv);
-                if (need < 0) need = 0;
-                if ((size_t)need + 1 > val_cap) {
-                    val = malloc((size_t)need + 1);
-                    val_cap = (size_t)need + 1;
-                    if (val == NULL) {
-                        free(buf);
-                        mnet_response_t r = {
-                            .status = 500,
-                            .content_type = "application/json",
-                            .body = strdup("null"),
-                            .body_length = 4,
-                        };
-                        return r;
+                int has_L = strchr(spec, 'L') != NULL;
+                if (has_L) {
+                    long double dv = va_arg(args, long double);
+                    nspec[si++] = '%';
+                    for (const char *q = spec + 1; q < conv_in_spec; q++) {
+                        if (*q == 'L') continue;
+                        nspec[si++] = *q;
                     }
+                    nspec[si++] = 'L';
+                    nspec[si++] = conv;
+                    nspec[si] = '\0';
+                    int need = snprintf(NULL, 0, nspec, dv);
+                    if (need < 0) need = 0;
+                    if ((size_t)need + 1 > val_cap) {
+                        val = malloc((size_t)need + 1);
+                        val_cap = (size_t)need + 1;
+                        if (val == NULL) {
+                            free(buf);
+                            mnet_response_t r = {
+                                .status = 500,
+                                .content_type = "application/json",
+                                .body = strdup("null"),
+                                .body_length = 4,
+                            };
+                            return r;
+                        }
+                    }
+                    vlen = snprintf(val, val_cap, nspec, dv);
+                } else {
+                    double dv = va_arg(args, double);
+                    /* spec already matches the double (e.g. %.2f, %f, %g). */
+                    int need = snprintf(NULL, 0, spec, dv);
+                    if (need < 0) need = 0;
+                    if ((size_t)need + 1 > val_cap) {
+                        val = malloc((size_t)need + 1);
+                        val_cap = (size_t)need + 1;
+                        if (val == NULL) {
+                            free(buf);
+                            mnet_response_t r = {
+                                .status = 500,
+                                .content_type = "application/json",
+                                .body = strdup("null"),
+                                .body_length = 4,
+                            };
+                            return r;
+                        }
+                    }
+                    vlen = snprintf(val, val_cap, spec, dv);
                 }
-                vlen = snprintf(val, val_cap, nspec, dv);
             } else {
                 unsigned long long uv;
                 int is_signed = strchr("di", conv) != NULL;

@@ -40,12 +40,12 @@ static int64_t now_ms_mono(void)
 
 /* poll() is not available on Windows. Use select() instead. */
 #ifdef _WIN32
-static int mnet_poll(int fd, int timeout_ms)
+static int mnet_poll(mnet_socket_t fd, int timeout_ms)
 {
     fd_set fds;
     struct timeval tv;
     FD_ZERO(&fds);
-    FD_SET((unsigned int)fd, &fds);
+    FD_SET(fd, &fds);
     tv.tv_sec = timeout_ms / 1000;
     tv.tv_usec = (timeout_ms % 1000) * 1000;
     return select(fd + 1, &fds, NULL, NULL, &tv);
@@ -1644,7 +1644,6 @@ void mnet_static(mnet_app_t *app, const char *url_prefix,
     r->path = path_copy;
     r->handler = static_handler;
     r->param_names = NULL;
-    r->legacy_handler = NULL;
     r->user_data = cfg;
     r->path_allocated = 1;
 

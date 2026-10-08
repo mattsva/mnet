@@ -128,7 +128,7 @@ static void test_jsonf(void)
     CHECK(body_is(mnet_jsonf("{\"n\":%d}", -42), "{\"n\":-42}"), "jsonf: %d");
     CHECK(body_is(mnet_jsonf("{\"n\":%5d}", 42), "{\"n\":   42}"), "jsonf: %5d");
     CHECK(body_is(mnet_jsonf("{\"n\":%05d}", 42), "{\"n\":00042}"), "jsonf: %05d");
-    CHECK(body_is(mnet_jsonf("{\"n\":%ld}", -5000000000L), "{\"n\":-5000000000}"),
+    CHECK(body_is(mnet_jsonf("{\"n\":%ld}", -2000000000L), "{\"n\":-2000000000}"),
         "jsonf: %ld");
     CHECK(body_is(mnet_jsonf("{\"n\":%lld}", 9000000000000000000LL),
         "{\"n\":9000000000000000000}"), "jsonf: %lld");

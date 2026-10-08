@@ -320,7 +320,7 @@ A full-featured example with both HTML pages and a JSON API, including authentic
 make test
 ```
 
-The suite has five parts:
+The suite has six parts:
 
 - `test/test_mnet.c` (43 cases) covers the pure functions: routing, path and
   query parameters, headers, cookies, JSON escaping, URL decoding, the header
@@ -340,8 +340,13 @@ The suite has five parts:
   feature: methods, HEAD, wildcards, middleware, the custom 404 handler,
   cookies, encoded parameters, response helpers, and the body/header
   boundaries.
+- `test/test_security.c` (61 check cases) is the regression suite for the
+  security fixes: `mnet_jsonf` format-string hardening, header/body scoping,
+  Content-Length/Transfer-Encoding handling, SIGPIPE survival, and Slowloris /
+  idle / slow-body timeouts. The jsonf half runs everywhere; the server half is
+  POSIX-only.
 
-All five run clean under Valgrind, AddressSanitizer and ThreadSanitizer, and
+All six run clean under Valgrind, AddressSanitizer and ThreadSanitizer, and
 the same suites run in CI against Make, CMake and Meson on Linux, macOS and
 Windows.
 

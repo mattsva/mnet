@@ -55,9 +55,14 @@ The core philosophy: **web development in C should feel almost as clean as in hi
 
 ## Design decisions
 
-- **Single-threaded, synchronous** - simple and predictable, no async complexity
-- **POSIX-only** - uses standard POSIX sockets, no external dependencies
-- **C17** - modern C, compiles with `-Wall -Wextra -Wpedantic -Werror`
-- **Macros for ergonomics** - `MNET_HANDLER` and route macros reduce boilerplate
-- **No legacy baggage** - clean, modern API only
-- **Memory-safe** - all response bodies are freed with `mnet_response_free()`
+- **Threaded worker pool by default** - 4 workers serve multiple clients
+  concurrently; pass `1` to `mnet_set_workers()` for the single-threaded
+  blocking loop (no synchronisation overhead), or `0` for the default.
+- **Cross-platform** - Linux, macOS, BSD, and Windows (POSIX sockets and
+  Win32 APIs under a thin compatibility layer); no external dependencies.
+- **C17** - modern C, compiles with `-Wall -Wextra -Wpedantic -Werror`.
+- **Macros for ergonomics** - `MNET_HANDLER` and route macros reduce boilerplate.
+- **Clean, modern API** - the legacy `mnet_handler_legacy_t` handler type was
+  removed in v0.2.1; only the modern `mnet_handler_t` return-value style is
+  supported.
+- **Memory-safe** - all response bodies are freed with `mnet_response_free()`.

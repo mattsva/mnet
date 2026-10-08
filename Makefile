@@ -1,7 +1,25 @@
+# =============================================================================
+#  mnet - Makefile
+# =============================================================================
+#  Targets:
+#    make build FILE=prog SRC=main.c     Build a single C program linked with mnet
+#    make examples                       Build all example programs
+#    make test                           Build and run the full test suite
+#    make clean                          Remove all build artifacts
+#    make help                           Show this help message
+#
+#  Variables:
+#    CC      - C compiler (default: gcc)
+#    CFLAGS  - Compiler flags
+#    LDFLAGS - Linker flags
+#    SRCS    - Library source files for mnet
+# =============================================================================
+
 CC      = gcc
 CFLAGS  = -std=c17 -Wall -Wextra -Wpedantic -Werror \
           -D_POSIX_C_SOURCE=200112L -Iinclude
 LDFLAGS =
+
 ifeq ($(shell uname -s),Darwin)
     CFLAGS += -D_DARWIN_C_SOURCE
 endif
@@ -14,13 +32,38 @@ else
     CFLAGS  += -pthread
 endif
 
-# Source files
+# Library source files for mnet
 SRCS    = src/mnet.c src/mnet_app.c src/mnet_response.c \
           src/mnet_request.c src/mnet_router.c
 
-.PHONY: examples test clean help
+# Default target: build everything
+all: examples
 
-# Build all examples
+# ---- Help ----
+
+.PHONY: help
+help:
+	@echo "======================================================================"
+	@echo "  mnet - Makefile targets"
+	@echo "======================================================================"
+	@echo ""
+	@echo "  make build FILE=prog SRC=main.c     Build a single C program linked with mnet"
+	@echo "  make build FILE=prog                Build a binary; SRC must be provided"
+	@echo ""
+	@echo "  make examples                       Build all example programs"
+	@echo ""
+	@echo "  make test                           Build and run the full test suite"
+	@echo ""
+	@echo "  make clean                          Remove all build artifacts"
+	@echo ""
+	@echo "  make help                           Show this help message"
+	@echo ""
+	@echo "  make                              Default target (builds all examples)"
+	@echo "======================================================================"
+
+# ---- Examples ----
+
+.PHONY: examples
 examples: example/example_http_server \
           example/example_api_server \
           example/example_combined
@@ -34,18 +77,27 @@ example/example_api_server: $(SRCS) example/example_api_server.c
 example/example_combined: $(SRCS) example/example_combined.c
 	$(CC) $(CFLAGS) -Iexample $(SRCS) example/example_combined.c -o $@ $(LDFLAGS)
 
-# Compile a .c file with mnet (e.g. make main builds from main.c)
-%:: %.c $(SRCS)
-	$(CC) $(CFLAGS) $(SRCS) $< -o $@
+# ---- Build a single program ----
+# Usage: make build FILE=prog SRC=main.c
+#   FILE=prog  Output binary name
+#   SRC=...    Application source file
+#   SRCS=...   Library source files (default: mnet library sources)
+.PHONY: build
+build:
+	@if [ -z "$(FILE)" ]; then \
+		echo "Usage: make build FILE=prog SRC=main.c [SRCS=...]"; \
+		exit 1; \
+	fi; \
+	if [ -z "$(SRCS)" ]; then \
+		SRCS='src/mnet.c src/mnet_app.c src/mnet_response.c src/mnet_request.c src/mnet_router.c'; \
+	fi; \
+	$(CC) $(CFLAGS) $(SRCS) $(SRC) -o $(FILE) $(LDFLAGS)
 
-# Run tests (builds + runs)
-test: clean test_mnet test_http test_parser test_stress test_features test_security
-	./test_mnet
-	./test_http
-	./test_parser
-	./test_stress
-	./test_features
-	./test_security
+# ---- Tests ----
+
+.PHONY: test
+test: clean test_mnet test_http test_parser test_stress test_features test_security test_client test_welcome
+	./test_welcome
 
 test_mnet: $(SRCS) test/test_mnet.c
 	$(CC) $(CFLAGS) -Itest $(SRCS) test/test_mnet.c -o $@ $(LDFLAGS)
@@ -71,23 +123,12 @@ test_client: $(SRCS) test/test_client.c
 test_welcome: $(SRCS) test/test_welcome.c
 	$(CC) $(CFLAGS) -Isrc $(SRCS) test/test_welcome.c -o $@ $(LDFLAGS)
 
-# Run tests (builds + runs)
-test: clean test_mnet test_http test_parser test_stress test_features test_security test_client test_welcome
-	./test_welcome
+# ---- Clean ----
+
+.PHONY: clean
 clean:
-	rm -f mnet-server test_mnet test_http test_parser test_stress test_features fuzz_http
+	rm -f mnet-server test_mnet test_http test_parser test_stress test_features test_security test_client test_welcome
 	rm -f example/example_http_server
 	rm -f example/example_api_server
 	rm -f example/example_combined
 	rm -f *.o
-
-# Help
-help:
-	@echo "mnet - available targets:"
-	@echo "  make examples  Build all example binaries"
-	@echo "  make test      Run the test suite (builds + runs)"
-	@echo "  make clean     Remove all built binaries"
-	@echo "  make help      Show this help"
-	@echo ""
-	@echo "  make <name>    Build <name>.c linked with mnet"
-	@echo "                  (e.g. make main builds ./main from main.c)"

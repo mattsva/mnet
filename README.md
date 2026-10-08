@@ -320,7 +320,7 @@ A full-featured example with both HTML pages and a JSON API, including authentic
 make test
 ```
 
-The suite has six parts:
+The suite has eight parts:
 
 - `test/test_mnet.c` (43 cases) covers the pure functions: routing, path and
   query parameters, headers, cookies, JSON escaping, URL decoding, the header
@@ -345,8 +345,10 @@ The suite has six parts:
   Content-Length/Transfer-Encoding handling, SIGPIPE survival, and Slowloris /
   idle / slow-body timeouts. The jsonf half runs everywhere; the server half is
   POSIX-only.
+- `test/test_client.c` (4 cases) covers the client-side HTTP API.
+- `test/test_welcome.c` (4 cases) covers the dev mode and welcome page.
 
-All six run clean under Valgrind, AddressSanitizer and ThreadSanitizer, and
+All suites run clean under Valgrind, AddressSanitizer and ThreadSanitizer, and
 the same suites run in CI against Make, CMake and Meson on Linux, macOS and
 Windows.
 
@@ -360,10 +362,12 @@ and sanitizer oracle over the parser rather than a coverage-guided fuzzer.
 | Target | Description |
 |--------|-------------|
 | `make examples` | Build all example binaries |
-| `make test` | Build and run all five test suites |
+| `make libmnet.a` | Build the static library |
+| `make libmnet.so` | Build the shared library |
+| `make test` | Build and run all test suites |
+| `make build FILE=prog SRC=main.c` | Build a single program linked with mnet |
 | `make clean` | Remove all built binaries |
 | `make help` | Show available targets |
-| `make <name>` | Build `<name>.c` linked with mnet (e.g. `make main`) |
 
 ## Requirements
 

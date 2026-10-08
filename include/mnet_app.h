@@ -126,4 +126,23 @@ void mnet_set_keep_alive_timeout(mnet_app_t *app, int seconds);
 /* Maximum request body size in bytes. 0 = 16 MB (default). */
 void mnet_set_max_body_size(mnet_app_t *app, size_t max_body_size);
 
+/* Client-side HTTP: perform a GET request and return the response body as a
+ * malloc()-allocated string. Returns NULL on failure. The caller must free()
+ * the returned string when done. */
+char *mnet_call(const char *url);
+
+/* Client-side HTTP async: perform a GET request. The callback is invoked with
+ * the response body (or NULL on failure) on the caller's thread. The response
+ * is freed automatically after the callback returns. */
+void mnet_call_async(const char *url, void (*callback)(char *body));
+
+/* Set the number of worker threads. 0 = default (4), 1 = single-threaded. */
+void mnet_set_workers(mnet_app_t *app, int workers);
+
+/* Maximum number of concurrent connections. 0 = unlimited (default). */
+void mnet_set_max_connections(mnet_app_t *app, int max_connections);
+
+/* Memory allocation limit for request bodies (bytes). 0 = default (16 MB). */
+void mnet_set_req_body_limit(mnet_app_t *app, size_t limit);
+
 #endif

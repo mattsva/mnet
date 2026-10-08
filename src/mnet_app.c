@@ -16,6 +16,20 @@
 #include <string.h>
 #include <time.h>
 
+/* POSIX socket and network headers for client-side HTTP (mnet_call) */
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#else
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 #ifndef _WIN32
 #include <poll.h>
 #include <signal.h>
@@ -1822,3 +1836,370 @@ int mnet_route(mnet_app_t *app, mnet_http_method_t method,
 {
     return mnet_add_route(app, method, path, handler);
 }
+
+/* ------------------------------------------------------------------ */
+/* Client-side HTTP                                                    */
+/* ------------------------------------------------------------------ */
+
+/* Create a connected TCP socket to the given host:port.
+ * Returns MNET_INVALID_SOCKET on failure. */
+static mnet_socket_t mnet_socket_connect(const char *host, uint16_t port)
+{
+    mnet_socket_t sock;
+    struct addrinfo hints;
+    struct addrinfo *result, *rp;
+    char port_str[16];
+    int error;
+
+    if (host == NULL) {
+        return MNET_INVALID_SOCKET;
+    }
+
+    snprintf(port_str, sizeof(port_str), "%u", (unsigned int)port);
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    error = getaddrinfo(host, port_str, &hints, &result);
+    if (error != 0) {
+        return MNET_INVALID_SOCKET;
+    }
+
+    sock = MNET_INVALID_SOCKET;
+    for (rp = result; rp != NULL; rp = rp->ai_next) {
+        sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (sock == MNET_INVALID_SOCKET) {
+            continue;
+        }
+
+        if (connect(sock, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
+            break;
+        }
+
+        mnet_close(sock);
+        sock = MNET_INVALID_SOCKET;
+    }
+
+    freeaddrinfo(result);
+    return sock;
+}
+
+static int mnet_url_parse(const char *url,
+    char *host_out, size_t host_size,
+    uint16_t *port_out, char *path_out, size_t path_size)
+{
+    const char *p = url;
+    const char *host_start = NULL;
+    const char *port_start = NULL;
+    const char *path_start = NULL;
+
+    if (url == NULL || host_out == NULL || port_out == NULL || path_out == NULL) {
+        return -1;
+    }
+
+    /* Skip scheme if present */
+    if (strncmp(url, "https://", 8) == 0) {
+        p += 8;
+    } else if (strncmp(url, "http://", 7) == 0) {
+        p += 7;
+    } else {
+        /* No scheme: assume http */
+        p = url;
+    }
+
+    /* Find host */
+    host_start = p;
+    while (*p && *p != ':' && *p != '/' && *p != '?' && *p != '#') {
+        p++;
+    }
+
+    if (host_start == p) {
+        /* Empty host */
+        return -1;
+    }
+
+    size_t host_len = (size_t)(p - host_start);
+    if (host_len >= host_size) {
+        host_len = host_size - 1;
+    }
+    memcpy(host_out, host_start, host_len);
+    host_out[host_len] = '\0';
+
+    /* Check for port */
+    if (*p == ':') {
+        port_start = p + 1;
+        p++;
+        while (*p && *p != '/' && *p != '?' && *p != '#') {
+            p++;
+        }
+    }
+
+    /* Check for path */
+    if (*p == '/' || *p == '?' || *p == '#' || *p == '\0') {
+        path_start = p;
+    }
+
+    if (path_start == NULL) {
+        path_start = "/";
+    }
+
+    size_t path_len = strlen(path_start);
+    if (path_len >= path_size) {
+        path_len = path_size - 1;
+    }
+    memcpy(path_out, path_start, path_len);
+    path_out[path_len] = '\0';
+
+    /* Parse port */
+    *port_out = 80;
+    if (port_start != NULL && port_start != path_start) {
+        char *endptr = NULL;
+        long port = strtol(port_start, &endptr, 10);
+        if (endptr != port_start && *endptr == '\0' && port > 0 && port < 65536) {
+            *port_out = (uint16_t)port;
+        }
+    }
+
+    return 0;
+}
+
+/* Read the HTTP response headers and body from a connected socket.
+ * Returns 0 on success, -1 on failure. */
+static int mnet_read_response(mnet_socket_t sock,
+    char **out_body, size_t *out_body_len, size_t max_body)
+{
+    char buf[8192];
+    size_t total_read = 0;
+    int header_done = 0;
+    int body_done = 0;
+    int in_body = 0;
+    ssize_t n;
+
+    *out_body = NULL;
+    *out_body_len = 0;
+
+    /* Read until we have the full response */
+    while (!body_done) {
+        n = mnet_recv(sock, buf, sizeof(buf));
+        if (n <= 0) {
+            if (n < 0 && mnet_socket_errno() == MNET_EINTR) {
+                continue;
+            }
+            break;
+        }
+
+        /* Check for header terminator */
+        if (!header_done) {
+            char *header_end = memchr(buf, '\r', (size_t)n);
+            if (header_end != NULL) {
+                header_done = 1;
+                in_body = 1;
+            }
+        }
+
+        if (header_done) {
+            /* Already past headers, read body */
+            if (!in_body) {
+                /* Headers ended but we need to find the body start */
+                char *header_end = memchr(buf, '\r', (size_t)n);
+                if (header_end != NULL) {
+                    size_t body_start = (size_t)(header_end - buf) + 2;
+                    if ((size_t)n > body_start) {
+                        memcpy(buf, buf + body_start, n - body_start);
+                        total_read = n - body_start;
+                        in_body = 1;
+                    }
+                }
+            }
+
+            if (in_body) {
+                size_t bytes_to_copy = (size_t)n;
+                if (total_read + bytes_to_copy > max_body) {
+                    bytes_to_copy = max_body - total_read;
+                }
+                if (bytes_to_copy > 0) {
+                    char *new_body = realloc(*out_body, total_read + bytes_to_copy + 1);
+                    if (new_body == NULL) {
+                        free(*out_body);
+                        return -1;
+                    }
+                    *out_body = new_body;
+                    memcpy(*out_body + total_read, buf, bytes_to_copy);
+                    total_read += bytes_to_copy;
+                    (*out_body)[total_read] = '\0';
+                }
+
+                if (total_read >= max_body) {
+                    body_done = 1;
+                }
+            }
+        }
+    }
+
+    if (n < 0) {
+        free(*out_body);
+        *out_body = NULL;
+        *out_body_len = 0;
+        return -1;
+    }
+
+    *out_body_len = total_read;
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Client-side HTTP: perform a GET request and return the response body as a
+ * malloc()-allocated string. Returns NULL on failure. The caller must free()
+ * the returned string when done.
+ * --------------------------------------------------------------------------- */
+char *mnet_call(const char *url)
+{
+    char host[1024];
+    char path[2048];
+    uint16_t port;
+    mnet_socket_t sock;
+    char *body = NULL;
+    size_t body_len = 0;
+    int status = -1;
+
+    if (url == NULL) {
+        return NULL;
+    }
+
+    /* Parse the URL */
+    if (mnet_url_parse(url, host, sizeof(host), &port, path, sizeof(path)) != 0) {
+        return NULL;
+    }
+
+    /* Connect to the server */
+    sock = mnet_socket_connect(host, port);
+    if (sock == MNET_INVALID_SOCKET) {
+        return NULL;
+    }
+
+    /* Set a receive timeout */
+    {
+        struct timeval tv;
+        tv.tv_sec = 30;
+        tv.tv_usec = 0;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    }
+
+    /* Build and send the HTTP request */
+    {
+        char req[4096];
+        int req_len;
+
+        if (strncmp(url, "https://", 8) == 0) {
+            req_len = snprintf(req, sizeof(req),
+                "GET %s HTTP/1.1\r\n"
+                "Host: %s\r\n"
+                "User-Agent: mnet/0.2.0\r\n"
+                "Accept: */*\r\n"
+                "Connection: close\r\n"
+                "\r\n",
+                path, host);
+        } else {
+            req_len = snprintf(req, sizeof(req),
+                "GET %s HTTP/1.1\r\n"
+                "Host: %s\r\n"
+                "User-Agent: mnet/0.2.0\r\n"
+                "Accept: */*\r\n"
+                "Connection: close\r\n"
+                "\r\n",
+                path, host);
+        }
+
+        if (req_len < 0 || (size_t)req_len >= sizeof(req)) {
+            mnet_close(sock);
+            return NULL;
+        }
+
+        if (mnet_send(sock, req, (size_t)req_len) < 0) {
+            mnet_close(sock);
+            return NULL;
+        }
+    }
+
+    /* Read the response */
+    if (mnet_read_response(sock, &body, &body_len, MNET_MAX_BODY_SIZE) != 0) {
+        mnet_close(sock);
+        free(body);
+        body = NULL;
+        return NULL;
+    }
+
+    mnet_close(sock);
+
+    /* Parse the status code from the response */
+    {
+        const char *status_line = strstr(body, "\r\n");
+        if (status_line != NULL) {
+            const char *status_start = status_line + 2;
+            const char *status_end = strchr(status_start, ' ');
+            if (status_end != NULL) {
+                status = atoi(status_start);
+            }
+        }
+    }
+
+    /* Check for HTTP error status (4xx, 5xx) */
+    if (status >= 400) {
+        free(body);
+        body = NULL;
+        return NULL;
+    }
+
+    return body;
+}
+
+/* ---------------------------------------------------------------------------
+ * Client-side HTTP async: perform a GET request. The callback is invoked with
+ * the response body (or NULL on failure) on the caller's thread. The response
+ * is freed automatically after the callback returns.
+ * --------------------------------------------------------------------------- */
+void mnet_call_async(const char *url, void (*callback)(char *body))
+{
+    char *body;
+
+    if (url == NULL || callback == NULL) {
+        return;
+    }
+
+    body = mnet_call(url);
+    callback(body);
+    free(body);
+}
+
+/* ---------------------------------------------------------------------------
+ * Configuration helpers
+ * --------------------------------------------------------------------------- */
+void mnet_set_req_body_limit(mnet_app_t *app, size_t limit)
+{
+    if (app != NULL) {
+        app->max_body_size = limit;
+    }
+}
+
+/* ---------------------------------------------------------------------------
+ * MNET_CALL macro: a convenience wrapper for client-side HTTP requests.
+ *
+ * MNET_CALL(url) expands to mnet_call(url), returning a pointer to a
+ * malloc()-allocated string containing the response body. Returns NULL on
+ * failure. The caller must free() the returned string when done.
+ *
+ * Usage:
+ *   MNET_HANDLER(fetch_google)
+ *   {
+ *       (void)req;
+ *       return mnet_json(MNET_CALL("https://google.com"));
+ *   }
+ *
+ * Supported URL forms:
+ *   - https://example.com
+ *   - http://example.com:8080/path
+ *   - example.com
+ *   - example.com:8080/path
+ * --------------------------------------------------------------------------- */
+#define MNET_CALL(url) mnet_call(url)

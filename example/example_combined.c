@@ -198,6 +198,25 @@ MNET_HANDLER(api_echo)
     );
 }
 
+/* Demonstrate client-side HTTP: call an external URL and return its content. */
+MNET_HANDLER(api_call)
+{
+    const char *url = MNET_QUERY(req, "url");
+    if (url == NULL || strlen(url) == 0) {
+        return mnet_error(400, "missing 'url' query parameter");
+    }
+
+    /* Call the URL and get the response body. */
+    char *result = mnet_call(url);
+    if (result == NULL) {
+        return mnet_error(502, "failed to call URL");
+    }
+
+    mnet_response_t r = mnet_json(result);
+    free(result);
+    return r;
+}
+
 MNET_HANDLER(custom_404)
 {
     (void)req;
@@ -217,6 +236,9 @@ int main(void)
 
     mnet_set_not_found_handler(app, custom_404);
 
+    /* Multithreading: worker pool (defaults to 4 workers). */
+    mnet_set_workers(app, 4);
+
     /* Optional configuration */
     mnet_set_max_connections(app, 100);
     mnet_set_keep_alive_timeout(app, 30);
@@ -235,6 +257,8 @@ int main(void)
     MNET_GET(app, "/api/protected", api_protected);
     MNET_GET(app, "/api/health", api_health);
     MNET_POST(app, "/api/echo", api_echo);
+    /* Client-side HTTP: call an external URL (see mnet_call()). */
+    MNET_GET(app, "/api/call", api_call);
 
     return example_serve(app, 8080,
         "Starting combined server on http://localhost:8080\n"

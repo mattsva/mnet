@@ -695,6 +695,26 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
                     else if (mod_j) sv = va_arg(args, long long);
                     else if (mod_t) sv = (long long)va_arg(args, ptrdiff_t);
                     else sv = va_arg(args, int);
+                    /* Size the buffer first: a width larger than the 64-byte
+                       stack buffer makes snprintf truncate while reporting
+                       the full length, and the later memcpy would then
+                       over-read the stack. */
+                    int need = snprintf(NULL, 0, nspec, sv);
+                    if (need < 0) need = 0;
+                    if ((size_t)need + 1 > val_cap) {
+                        val = malloc((size_t)need + 1);
+                        if (val == NULL) {
+                            free(buf);
+                            mnet_response_t r = {
+                                .status = 500,
+                                .content_type = "application/json",
+                                .body = strdup("null"),
+                                .body_length = 4,
+                            };
+                            return r;
+                        }
+                        val_cap = (size_t)need + 1;
+                    }
                     vlen = snprintf(val, val_cap, nspec, sv);
                     (void)uv;
                 } else {
@@ -706,6 +726,23 @@ mnet_response_t mnet_jsonfv(const char *format, va_list args)
                     else if (mod_j) uv = va_arg(args, unsigned long long);
                     else if (mod_t) uv = (unsigned long long)va_arg(args, ptrdiff_t);
                     else uv = va_arg(args, unsigned int);
+                    /* Size the buffer first (see the signed branch). */
+                    int need = snprintf(NULL, 0, nspec, uv);
+                    if (need < 0) need = 0;
+                    if ((size_t)need + 1 > val_cap) {
+                        val = malloc((size_t)need + 1);
+                        if (val == NULL) {
+                            free(buf);
+                            mnet_response_t r = {
+                                .status = 500,
+                                .content_type = "application/json",
+                                .body = strdup("null"),
+                                .body_length = 4,
+                            };
+                            return r;
+                        }
+                        val_cap = (size_t)need + 1;
+                    }
                     vlen = snprintf(val, val_cap, nspec, uv);
                 }
             }

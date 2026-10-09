@@ -104,6 +104,20 @@ static void test_jsonf(void)
     CHECK(is_rejected(mnet_jsonf("%*d", 5, 1)), "jsonf: '*' width is rejected");
     CHECK(is_rejected(mnet_jsonf("%a", 1.0)), "jsonf: %a is rejected");
     CHECK(is_rejected(mnet_jsonf("%123456d", 1)), "jsonf: absurd width is rejected");
+
+    /* A wide integer conversion must grow its scratch buffer: the integer
+       path formats into a 64-byte stack buffer, and a width that produces
+       more than 63 characters makes snprintf truncate while reporting the
+       full length, so the later memcpy over-reads the stack. */
+    {
+        mnet_response_t wide = mnet_jsonf("{\"n\":%4096d}", 5);
+        /* "{\"n\":" (5) + 4096 chars + "}" (1) = 4102 */
+        int ok = wide.status == 200 && wide.body != NULL && wide.body_length == 4102 &&
+            ((const char *)wide.body)[4095 + 5] == '5' &&
+            ((const char *)wide.body)[4101] == '}';
+        mnet_response_free(&wide);
+        CHECK(ok, "jsonf: wide integer conversion fills the full width");
+    }
     CHECK(is_rejected(mnet_jsonf(NULL)), "jsonf: NULL format is rejected");
 
     /* %f of a huge double is 308 bytes: larger than the old 256-byte buffer,

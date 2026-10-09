@@ -1177,6 +1177,11 @@ static mnet_response_t welcome_response(mnet_app_t *app)
         app->timeout_seconds, app->keep_alive_timeout,
         app->max_body_size, app->route_count,
         time_str, commit_hash);
+    /* snprintf reports the would-be length on truncation: the buffer has
+       512 bytes of slack over the template, but clamp anyway so a future
+       template edit cannot turn truncation into an over-read. */
+    if (written < 0) written = 0;
+    if ((size_t)written >= total_len) written = (int)total_len - 1;
 
     mnet_response_t r;
     r.status = 200;

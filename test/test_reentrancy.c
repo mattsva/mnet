@@ -34,7 +34,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define REENTRANCY_PORT 18779
+#define REENTRANCY_PORT 18780
 #define REENTRANCY_CLIENTS 32
 
 static int failures = 0;

@@ -11,8 +11,27 @@ if(MSVC)
     # names" — sscanf, strcpy, strdup, etc. These are false positives for
     # portable C code; suppress them so /WX does not escalate them to errors.
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    # MSVC's buffer-security hardening is on by default: /GS (stack cookies),
+    # /DYNAMICBASE (ASLR) and /NXCOMPAT (DEP) are all enabled unless explicitly
+    # turned off, so no extra flags are needed for parity with the POSIX side.
 else()
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+
+    # Hardening. -fstack-protector-strong works at any optimization level.
+    add_compile_options(-fstack-protector-strong)
+
+    # _FORTIFY_SOURCE=2 only makes sense with optimization: without it glibc
+    # emits a #warning that -Werror would escalate, and CMake's default
+    # (empty) build type compiles without -O. Restrict it to the optimized
+    # build types.
+    if(CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
+        add_compile_definitions(_FORTIFY_SOURCE=2)
+    endif()
+
+    # relro/now are ELF-only.
+    if(UNIX AND NOT APPLE)
+        add_link_options(-Wl,-z,relro,-z,now)
+    endif()
 endif()
 
 if(NOT WIN32)
@@ -135,6 +154,16 @@ add_executable(test_http_edge test/test_http_edge.c)
 target_link_libraries(test_http_edge PRIVATE mnet_static)
 target_include_directories(test_http_edge PRIVATE include src test)
 add_test(NAME mnet_http_edge_tests COMMAND test_http_edge)
+
+# Tests are assert()-based, and CMake's Release configs define NDEBUG, which
+# would compile every assertion out: the suite would then pass without
+# checking anything. Undefine it for the test targets so assertions stay
+# active in every build type, matching the Make and Meson builds.
+foreach(test_target IN ITEMS test_mnet test_http test_parser test_stress
+        test_features test_security test_client test_welcome test_starvation
+        test_reentrancy test_http_edge)
+    target_compile_options(${test_target} PRIVATE -UNDEBUG)
+endforeach()
 
 # Install
 install(TARGETS mnet_static mnet_shared

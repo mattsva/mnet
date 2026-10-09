@@ -1132,11 +1132,20 @@ static mnet_response_t welcome_response(mnet_app_t *app)
         return mnet_error(500, "internal server error");
     }
 
-    /* Get current time */
+    /* Get current time. localtime() returns a pointer to a process-wide
+       static struct tm, which is not safe to use from several worker
+       threads at once; use the reentrant variant instead. */
     time_t now = time(NULL);
-    struct tm *tm = localtime(&now);
-    char time_str[64];
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S %Z", tm);
+    char time_str[64] = "unknown";
+    struct tm tmbuf;
+#ifdef _WIN32
+    if (localtime_s(&tmbuf, &now) == 0)
+#else
+    if (localtime_r(&now, &tmbuf) != NULL)
+#endif
+    {
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S %Z", &tmbuf);
+    }
 
     /* Get git commit hash */
     char commit_hash[13] = "unknown";

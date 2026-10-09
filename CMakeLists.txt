@@ -126,6 +126,11 @@ target_link_libraries(test_starvation PRIVATE mnet_static)
 target_include_directories(test_starvation PRIVATE include src test)
 add_test(NAME mnet_starvation_tests COMMAND test_starvation)
 
+add_executable(test_reentrancy test/test_reentrancy.c)
+target_link_libraries(test_reentrancy PRIVATE mnet_static)
+target_include_directories(test_reentrancy PRIVATE include src test)
+add_test(NAME mnet_reentrancy_tests COMMAND test_reentrancy)
+
 # Install
 install(TARGETS mnet_static mnet_shared
     ARCHIVE DESTINATION lib

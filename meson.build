@@ -10,8 +10,26 @@ if cc.get_id() == 'msvc'
     add_project_arguments(['/W4', '/WX'], language: 'c')
     # Suppress false-positive C4996 deprecation warnings for standard C functions.
     add_project_arguments(['/D_CRT_SECURE_NO_WARNINGS', '/D_CRT_NONSTDC_NO_DEPRECATE'], language: 'c')
+    # MSVC's buffer-security hardening is on by default: /GS (stack cookies),
+    # /DYNAMICBASE (ASLR) and /NXCOMPAT (DEP) are all enabled unless explicitly
+    # turned off, so no extra flags are needed for parity with the POSIX side.
 else
     add_project_arguments(warning_flags, language: 'c')
+
+    # Hardening. -fstack-protector-strong works at any optimization level.
+    add_project_arguments('-fstack-protector-strong', language: 'c')
+
+    # _FORTIFY_SOURCE=2 only makes sense with optimization: without it glibc
+    # emits a #warning that -Werror would escalate. Meson's debug buildtype
+    # is -O0, so restrict it to optimized builds.
+    if get_option('optimization') != '0'
+        add_project_arguments('-D_FORTIFY_SOURCE=2', language: 'c')
+    endif
+
+    # relro/now are ELF-only.
+    if host_machine.system() == 'linux'
+        add_project_link_arguments('-Wl,-z,relro,-z,now', language: 'c')
+    endif
 endif
 
 # glibc's _FORTIFY_SOURCE is only meaningful with optimization, and some
@@ -163,6 +181,22 @@ test_http_edge = executable('test_http_edge',
 )
 
 test('mnet_http_edge_tests', test_http_edge)
+
+test_client = executable('test_client',
+    'test/test_client.c',
+    link_with: mnet_static,
+    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+)
+
+test('mnet_client_tests', test_client)
+
+test_welcome = executable('test_welcome',
+    'test/test_welcome.c',
+    link_with: mnet_static,
+    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+)
+
+test('mnet_welcome_tests', test_welcome)
 
 # Install headers (libraries are installed by default)
 install_headers('include/mnet/mnet.h', 'include/mnet/mnet_app.h', 'include/mnet/mnet_request.h',

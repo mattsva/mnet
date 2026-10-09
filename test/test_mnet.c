@@ -130,27 +130,26 @@ static void test_mnet_json_escape(void)
 {
     char out[256];
 
-    size_t n = mnet_json_escape(out, sizeof(out), "hello");
+    (void)mnet_json_escape(out, sizeof(out), "hello");
     assert(strcmp(out, "hello") == 0);
 
-    n = mnet_json_escape(out, sizeof(out), "he\"llo");
+    (void)mnet_json_escape(out, sizeof(out), "he\"llo");
     assert(strcmp(out, "he\\\"llo") == 0);
 
-    n = mnet_json_escape(out, sizeof(out), "a\\b");
+    (void)mnet_json_escape(out, sizeof(out), "a\\b");
     assert(strcmp(out, "a\\\\b") == 0);
 
-    n = mnet_json_escape(out, sizeof(out), "a\nb");
+    (void)mnet_json_escape(out, sizeof(out), "a\nb");
     assert(strcmp(out, "a\\nb") == 0);
 
-    n = mnet_json_escape(out, sizeof(out), "a\rb");
+    (void)mnet_json_escape(out, sizeof(out), "a\rb");
     assert(strcmp(out, "a\\rb") == 0);
 
-    n = mnet_json_escape(out, sizeof(out), "a\tb");
+    (void)mnet_json_escape(out, sizeof(out), "a\tb");
     assert(strcmp(out, "a\\tb") == 0);
 
-    n = mnet_json_escape(out, sizeof(out), "");
+    assert(mnet_json_escape(out, sizeof(out), "") == 0);
     assert(strcmp(out, "") == 0);
-    assert(n == 0);
 
     printf("  PASS test_mnet_json_escape\n");
 }
@@ -574,25 +573,21 @@ static void test_mnet_url_decode_malformed(void)
 
     /* The legacy wrapper must not leave a truncated value behind. */
     memset(out, 'X', sizeof(out));
-    size_t n = mnet_url_decode(out, sizeof(out), "a%zzb");
-    assert(n == 0);
+    assert(mnet_url_decode(out, sizeof(out), "a%zzb") == 0);
     assert(out[0] == '\0');
 
     memset(out, 'X', sizeof(out));
-    n = mnet_url_decode(out, sizeof(out), "a%00b");
-    assert(n == 0);
+    assert(mnet_url_decode(out, sizeof(out), "a%00b") == 0);
     assert(out[0] == '\0');
 
     /* exact fit succeeds */
     char buf4[4];
-    n = mnet_url_decode(buf4, sizeof(buf4), "abc");
-    assert(n == 3);
+    assert(mnet_url_decode(buf4, sizeof(buf4), "abc") == 3);
     assert(strcmp(buf4, "abc") == 0);
 
     /* overflow refuses */
     char buf3[3];
-    n = mnet_url_decode(buf3, sizeof(buf3), "abcd");
-    assert(n == 0);
+    assert(mnet_url_decode(buf3, sizeof(buf3), "abcd") == 0);
     assert(buf3[0] == '\0');
 
     printf("  PASS test_mnet_url_decode_malformed\n");

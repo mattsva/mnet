@@ -24,6 +24,16 @@ ifeq ($(shell uname -s),Darwin)
     CFLAGS += -D_DARWIN_C_SOURCE
 endif
 
+# Hardening. -fstack-protector-strong works at any optimization level and on
+# GCC/Clang; -Wl,-z,relro,-z,now is ELF-only, so it stays on Linux.
+# _FORTIFY_SOURCE=2 needs optimization, which this Makefile does not set by
+# default: add it yourself when building optimized, e.g.
+#   make CFLAGS="-O2 -D_FORTIFY_SOURCE=2 ..."
+CFLAGS  += -fstack-protector-strong
+ifeq ($(shell uname -s),Linux)
+    LDFLAGS += -Wl,-z,relro,-z,now
+endif
+
 # The worker pool needs pthreads on POSIX.
 ifeq ($(OS),Windows_NT)
     LDFLAGS += -lws2_32

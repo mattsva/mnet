@@ -131,6 +131,11 @@ target_link_libraries(test_reentrancy PRIVATE mnet_static)
 target_include_directories(test_reentrancy PRIVATE include src test)
 add_test(NAME mnet_reentrancy_tests COMMAND test_reentrancy)
 
+add_executable(test_http_edge test/test_http_edge.c)
+target_link_libraries(test_http_edge PRIVATE mnet_static)
+target_include_directories(test_http_edge PRIVATE include src test)
+add_test(NAME mnet_http_edge_tests COMMAND test_http_edge)
+
 # Install
 install(TARGETS mnet_static mnet_shared
     ARCHIVE DESTINATION lib

@@ -869,7 +869,8 @@ static void send_response(mnet_socket_t client, const mnet_response_t *r,
                     char chunk_header[32];
                     int chlen = snprintf(chunk_header, sizeof(chunk_header),
                         "%zx\r\n", r->body_length);
-                    mnet_send(client, chunk_header, (size_t)chlen);
+                    if (chlen > 0 && (size_t)chlen < sizeof(chunk_header))
+                        mnet_send(client, chunk_header, (size_t)chlen);
                     mnet_send(client, r->body, r->body_length);
                     mnet_send(client, "\r\n", 2);
                 }
@@ -893,6 +894,9 @@ static void send_simple_error(mnet_socket_t client, int status,
         "<body><h1>%d %s</h1><p>%s</p></body></html>",
         status, status_text, status, status_text, message);
     if (blen < 0) return;
+    /* snprintf returns the would-be length on truncation: clamp to the
+       buffer so the send below cannot read past it. */
+    if ((size_t)blen >= sizeof(body)) blen = (int)sizeof(body) - 1;
 
     char header[512];
     int hlen = snprintf(header, sizeof(header),
@@ -2081,7 +2085,12 @@ static int mnet_url_parse(const char *url,
     if (port_start != NULL && port_start != path_start) {
         char *endptr = NULL;
         long port = strtol(port_start, &endptr, 10);
-        if (endptr != port_start && *endptr == '\0' && port > 0 && port < 65536) {
+        /* The port digits must end exactly where the path begins: strtol
+           stops at the first non-digit, so endptr must equal path_start.
+           Requiring *endptr == '\0' instead would reject every URL that
+           carries both a port and a path (":8080/path"). */
+        if (endptr != port_start && (const char *)endptr == path_start &&
+            port > 0 && port < 65536) {
             *port_out = (uint16_t)port;
         }
     }
@@ -2089,23 +2098,29 @@ static int mnet_url_parse(const char *url,
     return 0;
 }
 
-/* Read the HTTP response headers and body from a connected socket.
+/* Read the HTTP response from a connected socket.
+ *
+ * Strips the response headers and returns only the body, NUL-terminated, in
+ * *out_body (the caller frees it). *out_status receives the numeric status
+ * code from the status line, or 0 if it could not be parsed. The response is
+ * read until the server closes the connection (mnet_call always sends
+ * "Connection: close"), bounded to max_body bytes of body.
+ *
  * Returns 0 on success, -1 on failure. */
 static int mnet_read_response(mnet_socket_t sock,
-    char **out_body, size_t *out_body_len, size_t max_body)
+    char **out_body, size_t *out_body_len, int *out_status, size_t max_body)
 {
     char buf[8192];
-    size_t total_read = 0;
-    int header_done = 0;
-    int body_done = 0;
-    int in_body = 0;
+    char *raw = NULL;
+    size_t raw_len = 0, raw_cap = 0;
+    size_t cap = max_body + sizeof(buf);
     ssize_t n = 0;
 
     *out_body = NULL;
     *out_body_len = 0;
+    *out_status = 0;
 
-    /* Read until we have the full response */
-    while (!body_done) {
+    while (raw_len < cap) {
         n = mnet_recv(sock, buf, sizeof(buf));
         if (n <= 0) {
             if (n < 0 && mnet_socket_errno() == MNET_EINTR) {
@@ -2113,63 +2128,64 @@ static int mnet_read_response(mnet_socket_t sock,
             }
             break;
         }
-
-        /* Check for header terminator */
-        if (!header_done) {
-            char *header_end = memchr(buf, '\r', (size_t)n);
-            if (header_end != NULL) {
-                header_done = 1;
-                in_body = 1;
+        if (raw_len + (size_t)n > raw_cap) {
+            size_t ncap = raw_cap ? raw_cap * 2 : 16384;
+            while (ncap < raw_len + (size_t)n) ncap *= 2;
+            char *nb = realloc(raw, ncap);
+            if (nb == NULL) {
+                free(raw);
+                return -1;
             }
+            raw = nb;
+            raw_cap = ncap;
         }
-
-        if (header_done) {
-            /* Already past headers, read body */
-            if (!in_body) {
-                /* Headers ended but we need to find the body start */
-                char *header_end = memchr(buf, '\r', (size_t)n);
-                if (header_end != NULL) {
-                    size_t body_start = (size_t)(header_end - buf) + 2;
-                    if ((size_t)n > body_start) {
-                        memcpy(buf, buf + body_start, n - body_start);
-                        total_read = n - body_start;
-                        in_body = 1;
-                    }
-                }
-            }
-
-            if (in_body) {
-                size_t bytes_to_copy = (size_t)n;
-                if (total_read + bytes_to_copy > max_body) {
-                    bytes_to_copy = max_body - total_read;
-                }
-                if (bytes_to_copy > 0) {
-                    char *new_body = realloc(*out_body, total_read + bytes_to_copy + 1);
-                    if (new_body == NULL) {
-                        free(*out_body);
-                        return -1;
-                    }
-                    *out_body = new_body;
-                    memcpy(*out_body + total_read, buf, bytes_to_copy);
-                    total_read += bytes_to_copy;
-                    (*out_body)[total_read] = '\0';
-                }
-
-                if (total_read >= max_body) {
-                    body_done = 1;
-                }
-            }
-        }
+        memcpy(raw + raw_len, buf, (size_t)n);
+        raw_len += (size_t)n;
     }
 
     if (n < 0) {
-        free(*out_body);
-        *out_body = NULL;
-        *out_body_len = 0;
+        free(raw);
         return -1;
     }
+    if (raw == NULL) {
+        return -1; /* no response at all */
+    }
 
-    *out_body_len = total_read;
+    /* Parse the status code from the first line: "HTTP/1.1 200 OK". */
+    if (raw_len >= 12 && strncmp(raw, "HTTP/", 5) == 0) {
+        const char *sp = memchr(raw, ' ', raw_len);
+        if (sp != NULL) {
+            *out_status = atoi(sp + 1);
+        }
+    }
+
+    /* The body starts after the first blank line. */
+    size_t body_off = raw_len; /* default: no body */
+    for (size_t i = 0; i + 1 < raw_len; i++) {
+        if (raw[i] == '\r' && i + 3 < raw_len &&
+            raw[i + 1] == '\n' && raw[i + 2] == '\r' && raw[i + 3] == '\n') {
+            body_off = i + 4;
+            break;
+        }
+        if (raw[i] == '\n' && raw[i + 1] == '\n') {
+            body_off = i + 2;
+            break;
+        }
+    }
+
+    size_t body_len = raw_len - body_off;
+    if (body_len > max_body) body_len = max_body;
+    char *body = malloc(body_len + 1);
+    if (body == NULL) {
+        free(raw);
+        return -1;
+    }
+    memcpy(body, raw + body_off, body_len);
+    body[body_len] = '\0';
+    free(raw);
+
+    *out_body = body;
+    *out_body_len = body_len;
     return 0;
 }
 
@@ -2219,27 +2235,14 @@ char *mnet_call(const char *url)
     /* Build and send the HTTP request */
     {
         char req[4096];
-        int req_len;
-
-        if (strncmp(url, "https://", 8) == 0) {
-            req_len = snprintf(req, sizeof(req),
-                "GET %s HTTP/1.1\r\n"
-                "Host: %s\r\n"
-                "User-Agent: mnet/0.2.5\r\n"
-                "Accept: */*\r\n"
-                "Connection: close\r\n"
-                "\r\n",
-                path, host);
-        } else {
-            req_len = snprintf(req, sizeof(req),
-                "GET %s HTTP/1.1\r\n"
-                "Host: %s\r\n"
-                "User-Agent: mnet/0.2.5\r\n"
-                "Accept: */*\r\n"
-                "Connection: close\r\n"
-                "\r\n",
-                path, host);
-        }
+        int req_len = snprintf(req, sizeof(req),
+            "GET %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "User-Agent: mnet/0.2.5\r\n"
+            "Accept: */*\r\n"
+            "Connection: close\r\n"
+            "\r\n",
+            path, host);
 
         if (req_len < 0 || (size_t)req_len >= sizeof(req)) {
             mnet_close(sock);
@@ -2252,27 +2255,15 @@ char *mnet_call(const char *url)
         }
     }
 
-    /* Read the response */
-    if (mnet_read_response(sock, &body, &body_len, MNET_MAX_BODY_SIZE) != 0) {
+    /* Read the response (headers are stripped; status is parsed by the
+       reader, since the body alone no longer carries it) */
+    if (mnet_read_response(sock, &body, &body_len, &status,
+            MNET_MAX_BODY_SIZE) != 0) {
         mnet_close(sock);
-        free(body);
-        body = NULL;
         return NULL;
     }
 
     mnet_close(sock);
-
-    /* Parse the status code from the response */
-    {
-        const char *status_line = strstr(body, "\r\n");
-        if (status_line != NULL) {
-            const char *status_start = status_line + 2;
-            const char *status_end = strchr(status_start, ' ');
-            if (status_end != NULL) {
-                status = atoi(status_start);
-            }
-        }
-    }
 
     /* Check for HTTP error status (4xx, 5xx) */
     if (status >= 400) {

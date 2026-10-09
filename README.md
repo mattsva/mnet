@@ -345,7 +345,9 @@ The suite has eight parts:
   Content-Length/Transfer-Encoding handling, SIGPIPE survival, and Slowloris /
   idle / slow-body timeouts. The jsonf half runs everywhere; the server half is
   POSIX-only.
-- `test/test_client.c` (4 cases) covers the client-side HTTP API.
+- `test/test_client.c` (6 cases) covers the client-side HTTP API: invalid URLs,
+  a request with an explicit port and path (body returned with headers
+  stripped), 4xx responses returning NULL, and the async callback.
 - `test/test_welcome.c` (4 cases) covers the dev mode and welcome page.
 
 All suites run clean under Valgrind, AddressSanitizer and ThreadSanitizer, and

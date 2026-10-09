@@ -168,7 +168,7 @@ mnet_set_workers(app, 4);
 /* Maximum concurrent connections. 0 = unlimited (default). */
 mnet_set_max_connections(app, 100);
 
-/* Keep-alive idle timeout in seconds. 0 = 30 s default. */
+/* Keep-alive idle timeout in seconds. 0 = 5 s default. */
 mnet_set_keep_alive_timeout(app, 30);
 
 /* Maximum request body size in bytes. 0 = 16 MB (default). */
@@ -387,8 +387,10 @@ If you expose a server to a network you do not fully trust, read this section.
 sends nothing would otherwise hold its connection indefinitely. A 30 second
 timeout is applied by default. `mnet_set_timeout(app, seconds)` overrides it (use
 `0` to get the default back), and `mnet_set_keep_alive_timeout()` sets the
-separate idle timeout for reused keep-alive connections. Setting a negative
-timeout disables the protection and is strongly discouraged in production.
+separate idle timeout for reused keep-alive connections (5 seconds by default,
+because an idle keep-alive connection occupies a worker thread for the whole
+wait). Setting a negative timeout disables the protection and is strongly
+discouraged in production.
 
 **Choose a worker count deliberately.** The server is threaded by default (4
 workers), so multiple clients are served concurrently. Handlers then run on

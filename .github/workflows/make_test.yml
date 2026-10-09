@@ -84,7 +84,7 @@ jobs:
           CFLAGS="-std=c17 -Wall -Wextra -Wpedantic -Werror -g \
                   -fsanitize=address,undefined -fno-omit-frame-pointer \
                   -D_POSIX_C_SOURCE=200112L -Iinclude -Iinclude/mnet -Isrc -pthread"
-          for t in test_mnet test_http test_mnet_parser test_stress test_features test_security test_client test_welcome; do
+          for t in test_mnet test_http test_mnet_parser test_stress test_features test_security test_client test_welcome test_starvation; do
             gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_response.c \
                 src/mnet_request.c src/mnet_router.c test/$t.c -o ${t}_asan || exit 1
           done
@@ -113,6 +113,9 @@ jobs:
       - name: Run welcome tests under ASan/UBSan
         run: ASAN_OPTIONS=detect_leaks=0 ./test_welcome_asan
 
+      - name: Run starvation tests under ASan/UBSan
+        run: ASAN_OPTIONS=detect_leaks=0 ./test_starvation_asan
+
   test-valgrind:
     runs-on: ubuntu-latest
     steps:
@@ -123,7 +126,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y valgrind
 
       - name: Build tests
-        run: make test_mnet test_http test_parser test_stress test_features test_security test_client test_welcome
+        run: make test_mnet test_http test_parser test_stress test_features test_security test_client test_welcome test_starvation
 
       - name: Valgrind unit tests
         run: valgrind --leak-check=full --error-exitcode=1 ./test_mnet
@@ -142,6 +145,9 @@ jobs:
 
       - name: Valgrind security tests
         run: valgrind --leak-check=full --error-exitcode=1 --trace-children=yes ./test_security
+
+      - name: Valgrind starvation tests
+        run: valgrind --leak-check=full --error-exitcode=1 --trace-children=yes ./test_starvation
 
   # The worker pool is the one part of the library that is only exercised with
   # threads, so run the concurrency tests under ThreadSanitizer too.

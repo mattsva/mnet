@@ -140,6 +140,14 @@ test_security = executable('test_security',
 
 test('mnet_security_tests', test_security)
 
+test_starvation = executable('test_starvation',
+    'test/test_starvation.c',
+    link_with: mnet_static,
+    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+)
+
+test('mnet_starvation_tests', test_starvation)
+
 # Install headers (libraries are installed by default)
 install_headers('include/mnet/mnet.h', 'include/mnet/mnet_app.h', 'include/mnet/mnet_request.h',
     'include/mnet/mnet_response.h', 'include/mnet/mnet_router.h', 'include/mnet/mnet_socket.h',

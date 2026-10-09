@@ -88,6 +88,10 @@ static int mnet_poll(int fd, int timeout_ms)
 #define MNET_MAX_WORKERS 64
 #define MNET_DEFAULT_WORKERS 4
 #define MNET_DEFAULT_TIMEOUT 30
+/* Idle keep-alive connections occupy a worker for the whole wait, so the
+   default is short: a new client is never delayed more than this long by
+   idle keep-alive connections. mnet_set_keep_alive_timeout() overrides it. */
+#define MNET_DEFAULT_KEEP_ALIVE_TIMEOUT 5
 #define MNET_LISTEN_BACKLOG 128
 
 /* Parse/validation outcomes, surfaced to the client as an HTTP status. */
@@ -1540,7 +1544,7 @@ mnet_app_t *mnet_create(void)
      * is on from the start. mnet_set_timeout(app, 0) restores this value.
      */
     app->timeout_seconds = MNET_DEFAULT_TIMEOUT;
-    app->keep_alive_timeout = MNET_DEFAULT_TIMEOUT;
+    app->keep_alive_timeout = MNET_DEFAULT_KEEP_ALIVE_TIMEOUT;
 
     /*
      * Threaded by default. A single-threaded blocking server lets one client
@@ -1727,7 +1731,8 @@ void mnet_set_max_connections(mnet_app_t *app, int max_connections)
 void mnet_set_keep_alive_timeout(mnet_app_t *app, int seconds)
 {
     if (app == NULL) return;
-    app->keep_alive_timeout = (seconds == 0) ? MNET_DEFAULT_TIMEOUT : seconds;
+    app->keep_alive_timeout = (seconds == 0) ?
+        MNET_DEFAULT_KEEP_ALIVE_TIMEOUT : seconds;
 }
 
 void mnet_set_max_body_size(mnet_app_t *app, size_t max_body_size)

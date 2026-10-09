@@ -38,10 +38,10 @@ SRCS    = src/mnet.c src/mnet_app.c src/mnet_response.c \
 
 TEST_SRCS = test/test_mnet.c test/test_http.c test/test_mnet_parser.c \
             test/test_stress.c test/test_features.c test/test_security.c \
-            test/test_client.c test/test_welcome.c
+            test/test_client.c test/test_welcome.c test/test_starvation.c
 
 TEST_BINS = test_mnet test_http test_parser test_stress test_features \
-            test_security test_client test_welcome
+            test_security test_client test_welcome test_starvation
 
 # Default target: build everything
 all: lib libmnet.a libmnet.so examples
@@ -152,6 +152,9 @@ test_client: $(SRCS) test/test_client.c
 
 test_welcome: $(SRCS) test/test_welcome.c
 	$(CC) $(CFLAGS) -Isrc $(SRCS) test/test_welcome.c -o $@ $(LDFLAGS)
+
+test_starvation: $(SRCS) test/test_starvation.c
+	$(CC) $(CFLAGS) -Isrc $(SRCS) test/test_starvation.c -o $@ $(LDFLAGS)
 
 # ---- Run the examples (build + run) ----
 # Usage: make run EXAMPLE=example_http_server PORT=8080

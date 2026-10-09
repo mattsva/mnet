@@ -154,7 +154,7 @@ mnet_set_workers(app, 4);
 /* Maximum concurrent connections. 0 = unlimited (default). */
 mnet_set_max_connections(app, 100);
 
-/* Keep-alive idle timeout in seconds. 0 = 30 s default. */
+/* Keep-alive idle timeout in seconds. 0 = 5 s default. */
 mnet_set_keep_alive_timeout(app, 30);
 
 /* Maximum request body size in bytes. 0 = 16 MB (default). */
@@ -194,7 +194,7 @@ mnet_set_max_connections(app, 100);
 
 ### Keep-alive timeout
 
-Keep-alive idle timeout in seconds. `0` means 30 seconds.
+Keep-alive idle timeout in seconds. `0` means 5 seconds.
 
 ```c
 mnet_set_keep_alive_timeout(app, 30);

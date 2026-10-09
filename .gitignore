@@ -8,6 +8,7 @@
 
 # Build directories
 build/
+build-*/
 _build/
 cmake-build-*/
 
@@ -19,6 +20,10 @@ test_stress
 test_features
 test_security
 test_client
+test_welcome
+test_starvation
+test_reentrancy
+test_http_edge
 fuzz_http
 mnet-server
 
@@ -36,7 +41,6 @@ example/example_combined
 
 # User-compiled binaries
 myapp
-test_welcome
 
 # OS
 .DS_Store

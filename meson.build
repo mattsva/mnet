@@ -63,9 +63,15 @@ endif
 mnet_sources = files(
     'src/mnet.c',
     'src/mnet_app.c',
+    'src/mnet_client.c',
+    'src/mnet_dispatch.c',
+    'src/mnet_handlers.c',
+    'src/mnet_log.c',
+    'src/mnet_parse.c',
     'src/mnet_response.c',
     'src/mnet_request.c',
     'src/mnet_router.c',
+    'src/mnet_server.c',
 )
 
 # Include directories
@@ -113,7 +119,7 @@ example_combined = executable('example_combined',
 test_mnet = executable('test_mnet',
     'test/test_mnet.c',
     link_with: mnet_static,
-    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+    include_directories: [mnet_inc, mnet_priv_inc, include_directories('src'), include_directories('test')],
 )
 
 test('mnet_tests', test_mnet)
@@ -121,7 +127,7 @@ test('mnet_tests', test_mnet)
 test_http = executable('test_http',
     'test/test_http.c',
     link_with: mnet_static,
-    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+    include_directories: [mnet_inc, mnet_priv_inc, include_directories('src'), include_directories('test')],
 )
 
 test('mnet_http_tests', test_http)
@@ -129,7 +135,7 @@ test('mnet_http_tests', test_http)
 test_parser = executable('test_parser',
     'test/test_mnet_parser.c',
     link_with: mnet_static,
-    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+    include_directories: [mnet_inc, mnet_priv_inc, include_directories('src'), include_directories('test')],
 )
 
 test('mnet_parser_tests', test_parser)
@@ -137,7 +143,7 @@ test('mnet_parser_tests', test_parser)
 test_stress = executable('test_stress',
     'test/test_stress.c',
     link_with: mnet_static,
-    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+    include_directories: [mnet_inc, mnet_priv_inc, include_directories('src'), include_directories('test')],
 )
 
 test('mnet_stress_tests', test_stress)
@@ -145,7 +151,7 @@ test('mnet_stress_tests', test_stress)
 test_features = executable('test_features',
     'test/test_features.c',
     link_with: mnet_static,
-    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+    include_directories: [mnet_inc, mnet_priv_inc, include_directories('src'), include_directories('test')],
 )
 
 test('mnet_feature_tests', test_features)
@@ -153,7 +159,7 @@ test('mnet_feature_tests', test_features)
 test_security = executable('test_security',
     'test/test_security.c',
     link_with: mnet_static,
-    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+    include_directories: [mnet_inc, mnet_priv_inc, include_directories('src'), include_directories('test')],
 )
 
 test('mnet_security_tests', test_security)
@@ -161,7 +167,7 @@ test('mnet_security_tests', test_security)
 test_starvation = executable('test_starvation',
     'test/test_starvation.c',
     link_with: mnet_static,
-    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+    include_directories: [mnet_inc, mnet_priv_inc, include_directories('src'), include_directories('test')],
 )
 
 test('mnet_starvation_tests', test_starvation)
@@ -169,7 +175,7 @@ test('mnet_starvation_tests', test_starvation)
 test_reentrancy = executable('test_reentrancy',
     'test/test_reentrancy.c',
     link_with: mnet_static,
-    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+    include_directories: [mnet_inc, mnet_priv_inc, include_directories('src'), include_directories('test')],
 )
 
 test('mnet_reentrancy_tests', test_reentrancy)
@@ -177,7 +183,7 @@ test('mnet_reentrancy_tests', test_reentrancy)
 test_http_edge = executable('test_http_edge',
     'test/test_http_edge.c',
     link_with: mnet_static,
-    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+    include_directories: [mnet_inc, mnet_priv_inc, include_directories('src'), include_directories('test')],
 )
 
 test('mnet_http_edge_tests', test_http_edge)
@@ -185,7 +191,7 @@ test('mnet_http_edge_tests', test_http_edge)
 test_client = executable('test_client',
     'test/test_client.c',
     link_with: mnet_static,
-    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+    include_directories: [mnet_inc, mnet_priv_inc, include_directories('src'), include_directories('test')],
 )
 
 test('mnet_client_tests', test_client)
@@ -193,7 +199,7 @@ test('mnet_client_tests', test_client)
 test_welcome = executable('test_welcome',
     'test/test_welcome.c',
     link_with: mnet_static,
-    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+    include_directories: [mnet_inc, mnet_priv_inc, include_directories('src'), include_directories('test')],
 )
 
 test('mnet_welcome_tests', test_welcome)

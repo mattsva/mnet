@@ -156,6 +156,14 @@ test_reentrancy = executable('test_reentrancy',
 
 test('mnet_reentrancy_tests', test_reentrancy)
 
+test_http_edge = executable('test_http_edge',
+    'test/test_http_edge.c',
+    link_with: mnet_static,
+    include_directories: [mnet_inc, include_directories('src'), include_directories('test')],
+)
+
+test('mnet_http_edge_tests', test_http_edge)
+
 # Install headers (libraries are installed by default)
 install_headers('include/mnet/mnet.h', 'include/mnet/mnet_app.h', 'include/mnet/mnet_request.h',
     'include/mnet/mnet_response.h', 'include/mnet/mnet_router.h', 'include/mnet/mnet_socket.h',

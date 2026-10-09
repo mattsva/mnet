@@ -405,14 +405,14 @@ connections with `503` once `n` are active. Without it there is no limit. Note
 that this is a simple counter, not per-IP rate limiting — it does not distinguish
 one abusive client from many legitimate ones.
 
-**HTTPS is not implemented.** The `mnet_set_https(app, 1)` flag only controls
-the HTTPS state reported on the welcome page; it does not add TLS. Terminate TLS
-in a reverse proxy (nginx, Caddy, stunnel) in front of mnet.
+**HTTPS is not implemented.** `mnet_set_https(app, 1)` is deprecated: it only
+controls the HTTPS state reported on the welcome page and adds no TLS at all.
+Terminate TLS in a reverse proxy (nginx, Caddy, stunnel) in front of mnet.
 
 **Enable development mode.** `mnet_set_dev_mode(app, 1)` enables a built-in
 welcome page. When no routes are registered and dev mode is on, mnet serves a
 welcome page at `/` and `/index.html` that shows the current development state
-(true/false), the current HTTPS state (https/http), and links to the GitHub
+(true/false), the reported HTTPS state (https/http, display only), and links to the GitHub
 README and to `docs/clib.md` for further setup.
 
 **Header size is bounded.** The request line and headers must fit in the 8 KB read

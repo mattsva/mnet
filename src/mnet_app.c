@@ -1102,7 +1102,7 @@ static mnet_response_t welcome_response(mnet_app_t *app)
         "<p>Go to <a href=\"https://github.com/mnet-web/mnet/blob/main/docs/clib.md\">\n"
         "clib.md</a> for further setup.</p>\n"
         "<p>Development state: %s</p>\n"
-        "<p>Current https state: %s</p>\n"
+        "<p>Reported https state: %s (display only, TLS is not implemented)</p>\n"
         "<p>Listening port: %d</p>\n"
         "<p>Debug mode: %s</p>\n"
         "<p>Worker count: %d</p>\n"

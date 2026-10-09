@@ -60,7 +60,7 @@ Content-Type: text/html
   <p>Go to <a href="https://github.com/mnet-web/mnet/blob/main/docs/clib.md">clib.md</a>
      for further setup.</p>
   <p>Development state: true</p>
-  <p>Current https state: https</p>
+  <p>Reported https state: https (display only, TLS is not implemented)</p>
 </body>
 </html>
 ```

@@ -94,9 +94,12 @@ void mnet_use(mnet_app_t *app, mnet_middleware_t middleware);
 void mnet_static(mnet_app_t *app, const char *url_prefix,
     const char *fs_path);
 
-/* Set HTTPS mode.
- * If enabled, the server will serve HTTPS (requires certificate and key).
- * The welcome page will show the current HTTPS state.
+/* Deprecated: set the HTTPS state shown on the welcome page.
+ *
+ * This does NOT enable TLS - mnet has no TLS support at all. It only
+ * controls the "https"/"http" text printed on the dev-mode welcome page.
+ * Do not use it to mean "the server speaks HTTPS": terminate TLS in a
+ * reverse proxy (nginx, Caddy, stunnel) in front of mnet instead.
  */
 void mnet_set_https(mnet_app_t *app, int enabled);
 

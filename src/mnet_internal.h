@@ -1,6 +1,20 @@
 #ifndef MNET_INTERNAL_H
 #define MNET_INTERNAL_H
 
+/* realpath() and clock_gettime() need feature-test macros that a plain
+ * -std=c17 translation unit does not get. Define them here (before any system
+ * header is pulled in) unless the consumer already requested a wider level. */
+#if !defined(_GNU_SOURCE) && !defined(_DEFAULT_SOURCE) && \
+    !defined(_BSD_SOURCE) && !defined(_XOPEN_SOURCE)
+    #define _DEFAULT_SOURCE 1
+#endif
+#if defined(_POSIX_C_SOURCE) && (_POSIX_C_SOURCE + 0) < 200809L
+    #undef _POSIX_C_SOURCE
+    #define _POSIX_C_SOURCE 200809L
+#elif !defined(_POSIX_C_SOURCE)
+    #define _POSIX_C_SOURCE 200809L
+#endif
+
 /*
  * Internal helpers shared by the mnet translation units.
  *
@@ -10,11 +24,26 @@
  * with #define _GNU_SOURCE, so the POSIX variants resolve correctly here.
  */
 
-#include "mnet_compat.h"
 #include "mnet_app.h"
+#include "mnet_compat.h"
+#include "mnet_request.h"
+#include "mnet_response.h"
+#include "mnet_router.h"
+#include "mnet_socket.h"
+
+#ifdef _WIN32
+    /* windows.h comes in through mnet_compat.h; the extra headers below cover
+     * the inline helpers declared further down. */
+    #include <time.h>
+#else
+    #include <stdlib.h> /* realpath() */
+    #include <time.h>   /* clock_gettime(), struct timespec */
+#endif
 
 #include <errno.h>
-#include <stdlib.h>
+#include <signal.h>
+#include <stddef.h>
+#include <stdint.h>
 
 /*
  * Emit a log message through the process-wide handler if one is installed,
@@ -23,6 +52,157 @@
  * strings.
  */
 void mnet_log_msg(int level, const char *fmt, ...);
+
+/* Set the process-wide handler consulted by mnet_log_msg(). Defined in
+ * mnet_log.c; mnet_set_log_handler() (mnet_app.c) installs it. */
+void mnet_log_set_handler(mnet_log_handler_t handler);
+
+/* Log through the per-app handler when one is set, otherwise fall back to
+ * mnet_log_msg(). Defined in mnet_log.c; used by every module that serves
+ * requests. */
+void mnet_app_log(mnet_app_t *app, int level, const char *fmt, ...);
+
+/* Millisecond-resolution monotonic clock for deadlines. time(NULL) has
+   1-second resolution, which makes sub-second timeouts unreliable. */
+#ifdef _WIN32
+static inline int64_t now_ms_mono(void)
+{
+    return (int64_t)GetTickCount64();
+}
+#else
+static inline int64_t now_ms_mono(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+#endif
+
+/* poll() is not available on Windows. Use select() instead. On Windows the
+   first argument (nfds) is ignored — it exists only for Berkeley socket
+   compatibility — so pass 0 rather than fd + 1 (fd is a SOCKET handle, and
+   casting it to int would both warn and risk truncation). */
+#ifdef _WIN32
+static inline int mnet_poll(mnet_socket_t fd, int timeout_ms)
+{
+    fd_set fds;
+    struct timeval tv;
+    FD_ZERO(&fds);
+    FD_SET(fd, &fds);
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    return select(0, &fds, NULL, NULL, &tv);
+}
+#else
+#include <poll.h>
+static inline int mnet_poll(int fd, int timeout_ms)
+{
+    struct pollfd pfd = { fd, POLLIN, 0 };
+    return poll(&pfd, 1, timeout_ms);
+}
+#endif
+
+/* ---- shared limits and constants ---- */
+
+#define MNET_INITIAL_ROUTE_CAPACITY 8
+#define MNET_REQUEST_BUFFER_SIZE 8192
+#define MNET_MAX_HEADER_BYTES MNET_REQUEST_BUFFER_SIZE
+#define MNET_MAX_HEADERS 100
+#define MNET_MAX_HEADER_LINE 4096
+#define MNET_MAX_QUERY_NAME 1024
+#define MNET_MAX_QUERY_VALUE 1024
+#define MNET_MAX_BODY_SIZE (16 * 1024 * 1024)
+#define MNET_MAX_PARAMS 16
+#define MNET_MAX_QUERY 16
+#define MNET_MAX_WORKERS 64
+#define MNET_DEFAULT_WORKERS 4
+#define MNET_DEFAULT_TIMEOUT 30
+/* Idle keep-alive connections occupy a worker thread for their whole wait, so
+   the default is short: a new client is never delayed more than this long by
+   idle keep-alive connections. mnet_set_keep_alive_timeout() overrides it. */
+#define MNET_DEFAULT_KEEP_ALIVE_TIMEOUT 5
+#define MNET_LISTEN_BACKLOG 128
+
+/* Parse/validation outcomes, surfaced to the connection handler. */
+#define MNET_PARSE_OK 0
+#define MNET_PARSE_BAD_REQUEST 1
+#define MNET_PARSE_TOO_LARGE 2
+#define MNET_PARSE_HEADERS_TOO_LARGE 3
+#define MNET_PARSE_UNSUPPORTED_METHOD 4
+#define MNET_PARSE_BAD_CONTENT_LENGTH 5
+#define MNET_PARSE_DUPLICATE_CONTENT_LENGTH 6
+#define MNET_PARSE_UNSUPPORTED_TRANSFER_ENCODING 7
+
+/* ---- opaque application state ---- */
+
+typedef struct {
+    char *url_prefix;
+    char *fs_path;
+    mnet_app_t *app; /* for logging; not owned */
+} static_config_t;
+
+struct mnet_app {
+    mnet_route_t *routes;
+    size_t route_count;
+    size_t route_capacity;
+    /*
+     * Set from a signal handler, so it must be a volatile sig_atomic_t: the
+     * C standard only guarantees that type is safe to write from a handler and
+     * read asynchronously elsewhere.
+     */
+    volatile sig_atomic_t running;
+    int debug;
+    int dev;
+    int https;
+    int port; /* listening port, set by mnet_run() */
+    mnet_response_t (*not_found_handler)(mnet_request_t *req);
+    mnet_middleware_t middleware;
+    int timeout_seconds;
+    int max_connections;
+    int keep_alive_timeout;
+    size_t max_body_size;
+    mnet_log_handler_t log_handler;
+    int workers;
+    int active_connections; /* guarded by the pool mutex */
+};
+
+/* One parsed request, owned by the connection handler until dispatch ends. */
+typedef struct {
+    char method[16];
+    char path[2048];
+    char path_only[2048];
+    char *query_string;
+    char *body;
+    size_t body_length;
+    int body_heap;
+    mnet_http_method_t method_enum;
+    request_extras_t extras;
+    int keep_alive;
+} parsed_request_t;
+
+/* ---- cross-module declarations ---- */
+
+/* Response writing (mnet_dispatch.c) */
+void send_response(mnet_socket_t client, const mnet_response_t *r,
+    int head_only, int keep_alive);
+void send_simple_error(mnet_socket_t client, int status,
+    const char *status_text, const char *message, int debug);
+void send_not_found(mnet_socket_t client, const char *path, int debug,
+    int keep_alive);
+void send_method_not_allowed(mnet_socket_t client, const char *method,
+    int debug, int keep_alive);
+mnet_response_t dispatch(mnet_app_t *app, parsed_request_t *parsed,
+    const char **param_values, size_t max_params, size_t *out_param_count);
+
+/* Built-in handlers (mnet_handlers.c) */
+mnet_response_t welcome_response(mnet_app_t *app);
+mnet_response_t static_handler(mnet_request_t *req);
+
+/* Request parsing (mnet_parse.c) */
+int parse_request(mnet_socket_t client, const char *buffer,
+    ssize_t received, parsed_request_t *out, size_t max_body_size,
+    int timeout_ms);
+void free_extras(request_extras_t *e);
 
 /*
  * Minimal threading layer.

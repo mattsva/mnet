@@ -85,8 +85,11 @@ jobs:
                   -fsanitize=address,undefined -fno-omit-frame-pointer \
                   -D_POSIX_C_SOURCE=200112L -Iinclude -Iinclude/mnet -Isrc -pthread"
           for t in test_mnet test_http test_mnet_parser test_stress test_features test_security test_client test_welcome test_starvation test_reentrancy test_http_edge; do
-            gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_response.c \
-                src/mnet_request.c src/mnet_router.c test/$t.c -o ${t}_asan || exit 1
+            gcc $CFLAGS src/mnet.c src/mnet_app.c src/mnet_client.c \
+                src/mnet_dispatch.c src/mnet_handlers.c src/mnet_log.c \
+                src/mnet_parse.c src/mnet_response.c \
+                src/mnet_request.c src/mnet_router.c src/mnet_server.c \
+                test/$t.c -o ${t}_asan || exit 1
           done
 
       - name: Run unit tests under ASan/UBSan
@@ -174,14 +177,20 @@ jobs:
           gcc -std=c17 -Wall -Wextra -Wpedantic -Werror -g \
               -fsanitize=thread -D_POSIX_C_SOURCE=200112L \
               -Iinclude -Iinclude/mnet -Isrc -pthread \
-              src/mnet.c src/mnet_app.c src/mnet_response.c \
-              src/mnet_request.c src/mnet_router.c test/test_mnet_parser.c \
+              src/mnet.c src/mnet_app.c src/mnet_client.c \
+              src/mnet_dispatch.c src/mnet_handlers.c src/mnet_log.c \
+              src/mnet_parse.c src/mnet_response.c \
+              src/mnet_request.c src/mnet_router.c src/mnet_server.c \
+              test/test_mnet_parser.c \
               -o test_parser_tsan
           gcc -std=c17 -Wall -Wextra -Wpedantic -Werror -g \
               -fsanitize=thread -D_POSIX_C_SOURCE=200112L \
               -Iinclude -Iinclude/mnet -Isrc -pthread \
-              src/mnet.c src/mnet_app.c src/mnet_response.c \
-              src/mnet_request.c src/mnet_router.c test/test_stress.c \
+              src/mnet.c src/mnet_app.c src/mnet_client.c \
+              src/mnet_dispatch.c src/mnet_handlers.c src/mnet_log.c \
+              src/mnet_parse.c src/mnet_response.c \
+              src/mnet_request.c src/mnet_router.c src/mnet_server.c \
+              test/test_stress.c \
               -o test_stress_tsan
 
       - name: Run parser and concurrency tests under TSan

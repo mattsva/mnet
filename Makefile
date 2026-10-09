@@ -43,8 +43,10 @@ else
 endif
 
 # Library source files for mnet
-SRCS    = src/mnet.c src/mnet_app.c src/mnet_response.c \
-          src/mnet_request.c src/mnet_router.c
+SRCS    = src/mnet.c src/mnet_app.c src/mnet_client.c src/mnet_dispatch.c \
+          src/mnet_handlers.c src/mnet_log.c src/mnet_parse.c \
+          src/mnet_response.c src/mnet_request.c src/mnet_router.c \
+          src/mnet_server.c
 
 TEST_SRCS = test/test_mnet.c test/test_http.c test/test_mnet_parser.c \
             test/test_stress.c test/test_features.c test/test_security.c \

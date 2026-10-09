@@ -9,6 +9,7 @@
 #define _GNU_SOURCE
 #include <mnet/mnet.h>
 #include <mnet/mnet_app.h>
+#include "mnet_internal.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -18,25 +19,6 @@
 
 /* Forward declaration of mnet_app_t with struct definition for testing.
  * In a real project, this would be in the header. */
-struct mnet_app {
-    mnet_route_t *routes;
-    size_t route_count;
-    size_t route_capacity;
-    volatile sig_atomic_t running;
-    int debug;
-    int dev;
-    int https;
-    mnet_response_t (*not_found_handler)(mnet_request_t *req);
-    mnet_middleware_t middleware;
-    int timeout_seconds;
-    int max_connections;
-    int keep_alive_timeout;
-    size_t max_body_size;
-    mnet_log_handler_t log_handler;
-    int workers;
-    int active_connections;
-};
-
 static int failures = 0;
 static int passed = 0;
 
